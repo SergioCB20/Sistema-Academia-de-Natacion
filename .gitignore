@@ -1,0 +1,46 @@
+# Logs (Archivos de error que no sirven a nadie más)
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Dependencias (¡CRÍTICO! Nunca subas esto, pesa gigas)
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files (Configuraciones de tu PC)
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables (SEGURIDAD MÁXIMA)
+# Aquí van tus claves secretas. Nunca las subas.
+.env
+.env.*
+!.env.example
+
+# Vite (Carpetas de compilación)
+# Lo que se genera con "npm run build" no se sube.
+build
+.eslintcache
+
+# Firebase (Caché local de los emuladores)
+.firebase/
+.firebaserc
+
+# Testing
+coverage
