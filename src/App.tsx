@@ -1,16 +1,30 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import MainLayout from './components/layout/MainLayout';
+import Dashboard from './pages/Dashboard';
+import Students from './pages/Students';
+import Schedule from './pages/Schedule';
+import Finance from './pages/Finance';
+import IDCard from './pages/IDCard';
+import Login from './pages/Login';
 
 function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-blue-50">
-      <div className="text-center p-10 bg-white rounded-xl shadow-lg">
-        <h1 className="text-4xl font-bold text-blue-600 mb-4">🏊‍♂️ Los Parrales</h1>
-        <p className="text-gray-600">Sistema listo para desarrollar.</p>
-        <button className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-          Probar Tailwind
-        </button>
-      </div>
-    </div>
-  )
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+
+        <Route path="/" element={<MainLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="alumnos" element={<Students />} />
+          <Route path="horarios" element={<Schedule />} />
+          <Route path="caja" element={<Finance />} />
+          <Route path="carnet" element={<IDCard />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
 
-export default App
+export default App;
