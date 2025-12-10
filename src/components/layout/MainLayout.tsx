@@ -5,22 +5,31 @@ import { cn } from '../../lib/utils';
 // import { auth } from '../../lib/firebase';
 // import { signOut } from 'firebase/auth'; // Uncomment when auth is fully ready
 
+import { useAuth } from '../../context/AuthContext';
+
+// ...
+
 export default function MainLayout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const navigate = useNavigate();
+    const { role, logout } = useAuth();
 
     const handleLogout = async () => {
-        // await signOut(auth);
+        await logout();
         navigate('/login');
     };
 
     const navItems = [
-        { to: '/', icon: LayoutDashboard, label: 'Panel' },
+        { to: '/', icon: LayoutDashboard, label: 'Panel', roles: ['ADMIN'] },
         { to: '/alumnos', icon: Users, label: 'Alumnos' },
         { to: '/horarios', icon: Calendar, label: 'Horarios' },
-        { to: '/caja', icon: DollarSign, label: 'Caja' },
+        { to: '/caja', icon: DollarSign, label: 'Caja', roles: ['ADMIN'] },
         { to: '/carnet', icon: CreditCard, label: 'Carnet' },
     ];
+
+    const filteredNavItems = navItems.filter(item =>
+        !item.roles || (role && item.roles.includes(role))
+    );
 
     return (
         <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
@@ -36,7 +45,7 @@ export default function MainLayout() {
                     </div>
 
                     <nav className="flex-1 px-4 py-6 space-y-2">
-                        {navItems.map((item) => (
+                        {filteredNavItems.map((item) => (
                             <NavLink
                                 key={item.to}
                                 to={item.to}

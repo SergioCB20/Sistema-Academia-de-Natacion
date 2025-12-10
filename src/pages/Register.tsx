@@ -1,32 +1,36 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { AlertCircle } from 'lucide-react';
 
-export default function Login() {
+export default function Register() {
     const navigate = useNavigate();
+    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLoading(true);
 
         try {
-            await signInWithEmailAndPassword(auth, email, password);
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            await updateProfile(userCredential.user, {
+                displayName: name
+            });
             navigate('/');
         } catch (err: any) {
             console.error(err);
-            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-                setError('Correo o contraseña incorrectos.');
-            } else if (err.code === 'auth/too-many-requests') {
-                setError('Demasiados intentos. Intenta más tarde.');
+            if (err.code === 'auth/email-already-in-use') {
+                setError('El correo ya está registrado.');
+            } else if (err.code === 'auth/weak-password') {
+                setError('La contraseña es muy débil (mínimo 6 caracteres).');
             } else {
-                setError('Ocurrió un error al iniciar sesión.');
+                setError('Ocurrió un error al registrarse.');
             }
         } finally {
             setLoading(false);
@@ -36,9 +40,9 @@ export default function Login() {
     return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-                <div className="bg-sky-500 p-8 text-center">
-                    <h1 className="text-3xl font-bold text-white mb-2">Los Parrales</h1>
-                    <p className="text-sky-100">Academia de Natación</p>
+                <div className="bg-emerald-600 p-8 text-center">
+                    <h1 className="text-3xl font-bold text-white mb-2">Crear Cuenta</h1>
+                    <p className="text-emerald-100">Únete a Los Parrales</p>
                 </div>
 
                 <div className="p-8">
@@ -49,14 +53,25 @@ export default function Login() {
                         </div>
                     )}
 
-                    <form onSubmit={handleLogin} className="space-y-6">
+                    <form onSubmit={handleRegister} className="space-y-6">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">Nombre Completo</label>
+                            <input
+                                type="text"
+                                required
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                                placeholder="Ej. Juan Pérez"
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                            />
+                        </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">Correo Electrónico</label>
                             <input
                                 type="email"
                                 required
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500 transition-all"
-                                placeholder="admin@losparrales.com"
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                                placeholder="correo@ejemplo.com"
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                             />
@@ -66,8 +81,9 @@ export default function Login() {
                             <input
                                 type="password"
                                 required
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 focus:border-sky-500 transition-all"
+                                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
                                 placeholder="••••••••"
+                                minLength={6}
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
                             />
@@ -77,19 +93,18 @@ export default function Login() {
                             disabled={loading}
                             className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold py-4 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98]"
                         >
-                            {loading ? 'Iniciando...' : 'Iniciar Sesión'}
+                            {loading ? 'Creando cuenta...' : 'Registrarse'}
                         </button>
                     </form>
 
                     <div className="mt-6 text-center">
                         <p className="text-slate-500 text-sm">
-                            ¿No tienes cuenta?{' '}
-                            <Link to="/register" className="text-sky-600 font-bold hover:text-sky-700">
-                                Regístrate aquí
+                            ¿Ya tienes cuenta?{' '}
+                            <Link to="/login" className="text-emerald-600 font-bold hover:text-emerald-700">
+                                Inicia sesión aquí
                             </Link>
                         </p>
                     </div>
-
                 </div>
             </div>
         </div>

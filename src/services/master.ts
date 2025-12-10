@@ -1,5 +1,6 @@
 import { doc, writeBatch, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { dateUtils } from '../utils/date';
 import type { DayCatalog, HourCatalog, ScheduleRule } from '../types/db';
 
 // --- CONFIGURACIÓN MAESTRA (Hardcoded for simplicity in Phase 1) ---
@@ -69,9 +70,10 @@ export const masterService = {
             const dayId = mapDay[dayIndex];
 
             // Format YYYY-MM-DD
-            const dateStr = current.toISOString().split('T')[0];
+            const dateStr = dateUtils.formatDateId(current);
 
             // Find rules active for this day
+            let slotsForDay = 0;
             for (const hour of HOURS) {
                 const rule = SCHEDULE_RULES.find(r =>
                     r.timeId === hour.id && r.dayIds.includes(dayId)
@@ -82,26 +84,24 @@ export const masterService = {
                     const slotRef = doc(db, 'daily_slots', slotId);
 
                     // Find students that have this slot in their fixedSchedule
-                    // fixedSchedule is [{dayId: 'LUN', timeId: '06-07'}, ...]
                     const attendees = students
                         .filter(s => s.fixedSchedule?.some((fs: any) => fs.dayId === dayId && fs.timeId === hour.id))
-                        .map(s => s.id); // Assuming ID matches what we want to store
+                        .map(s => s.id);
 
                     batch.set(slotRef, {
                         id: slotId,
-                        date: dateStr,
+                        date: dateStr, // "2025-12-08"
                         timeId: hour.id,
                         capacity: rule.capacity,
-                        attendeeIds: attendees, // Pre-fill
-                        locks: [] // Reset locks
-                    }, { merge: true }); // Merge true keeps other fields if they existed, but we are overwriting main ones.
-                    // Important: If we re-generate, we might overwrite 'attendees'. 
-                    // ideally 'generate' is for NEW slots. If slots exist, maybe we shouldn't overwrite?
-                    // For now, this tool is "Debug/Seed", so overwriting is expected behavior to "Reset" or "Fix".
+                        attendeeIds: attendees,
+                        locks: []
+                    }, { merge: true });
 
                     operations++;
+                    slotsForDay++;
                 }
             }
+            console.log(`Day ${dateStr} (${dayId}): Generated ${slotsForDay} slots.`);
         }
 
         if (operations > 0) {

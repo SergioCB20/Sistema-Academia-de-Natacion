@@ -60,6 +60,9 @@ export interface Student {
     fixedSchedule: Array<{ dayId: string; timeId: string }>; // Array of slots ID: "LUN_07-08" or object
     category: StudentCategory;
     email?: string; // Optional context
+    createdAt: number; // Timestamp
+    birthDate: string; // YYYY-MM-DD
+    age?: number; // Manual age override
 }
 
 export interface AppUser {
@@ -98,4 +101,23 @@ export interface AttendanceLog {
     slotId: string; // Ref to DailySlot
     timestamp: number;
     checkedBy: string; // User UID
+}
+
+export type LogType = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
+
+export interface SystemLog {
+    id: string;
+    text: string;
+    type: LogType;
+    timestamp: number;
+    metadata?: any;
+}
+
+export type UserRole = 'ADMIN' | 'USER';
+
+export interface UserProfile {
+    uid: string;
+    email: string;
+    role: UserRole;
+    displayName?: string;
 }

@@ -11,6 +11,13 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+if (!firebaseConfig.apiKey) {
+    throw new Error(
+        "Falta la configuración de Firebase (VITE_FIREBASE_API_KEY).\n" +
+        "Por favor crea un archivo .env en la raíz del proyecto con tus credenciales."
+    );
+}
+
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 

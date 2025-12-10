@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign } from 'lucide-react';
 import { scheduleService } from '../services/schedule';
+import { dateUtils } from '../utils/date';
 import { masterService, HOURS } from '../services/master';
 import { studentService } from '../services/students';
 import type { DailySlot, Student } from '../types/db';
@@ -40,8 +41,8 @@ export default function Schedule() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const startStr = weekDays[0].toISOString().split('T')[0];
-            const endStr = weekDays[6].toISOString().split('T')[0];
+            const startStr = dateUtils.formatDateId(weekDays[0]);
+            const endStr = dateUtils.formatDateId(weekDays[6]);
 
             // Parallel fetch
             const [slotsData, studentsData] = await Promise.all([
@@ -76,7 +77,7 @@ export default function Schedule() {
         try {
             await masterService.generateSlots(weekStart, 7);
             await loadData(); // Reload all
-            alert("Horarios generados correctamente");
+            alert(`Horarios generados correctamente.\nSemana: ${dateUtils.formatDateId(weekStart)}`);
         } catch (error) {
             console.error(error);
             alert("Error al generar horarios");
@@ -136,7 +137,7 @@ export default function Schedule() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                 <div>
                     <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
-                        <Calendar className="w-8 h-8 text-sky-600" />
+                        <CalendarIcon className="w-8 h-8 text-sky-600" />
                         Horarios
                     </h2>
                     <p className="text-slate-500">Gestión de reservas y asistencia</p>
@@ -197,7 +198,7 @@ export default function Schedule() {
                                     {hour.label.split(' - ')[0]}
                                 </div>
                                 {weekDays.map((day, i) => {
-                                    const dateStr = day.toISOString().split('T')[0];
+                                    const dateStr = dateUtils.formatDateId(day);
                                     const slot = getSlot(dateStr, hour.id);
 
                                     if (!slot) return (
