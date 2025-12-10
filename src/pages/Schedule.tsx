@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign, Trash2 } from 'lucide-react';
 import { scheduleService } from '../services/schedule';
 import { dateUtils } from '../utils/date';
 import { masterService, HOURS } from '../services/master';
@@ -14,8 +14,10 @@ export default function Schedule() {
     const [seeding, setSeeding] = useState(false);
 
     // Modal State
+    // Modal State
     const [selectedSlot, setSelectedSlot] = useState<DailySlot | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [bookingLoading, setBookingLoading] = useState(false);
 
@@ -89,6 +91,7 @@ export default function Schedule() {
     const openBookingModal = (slot: DailySlot) => {
         setSelectedSlot(slot);
         setSearchTerm('');
+        setViewMode('list');
         setIsModalOpen(true);
     };
 
@@ -114,11 +117,32 @@ export default function Schedule() {
         }
     };
 
-    // Filter students for search
     const filteredStudents = students.filter(s =>
         s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.dni.includes(searchTerm)
     );
+
+    const handleCancelBooking = async (student: Student) => {
+        if (!selectedSlot) return;
+
+        if (!confirm(`¿Eliminar a ${student.fullName} de esta clase?`)) return;
+
+        setBookingLoading(true);
+        try {
+            await scheduleService.cancelBooking(selectedSlot.id, student.id);
+            await loadData();
+            // Update the selected slot with new data
+            const updatedSlot = slots.find(s => s.id === selectedSlot.id);
+            if (updatedSlot) {
+                setSelectedSlot({ ...updatedSlot, attendeeIds: updatedSlot.attendeeIds.filter(id => id !== student.id) });
+            }
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Error al cancelar reserva");
+        } finally {
+            setBookingLoading(false);
+        }
+    };
 
     const getSlot = (dateStr: string, timeId: string) => {
         return slots.find(s => s.date === dateStr && s.timeId === timeId);
@@ -257,70 +281,132 @@ export default function Schedule() {
                         </div>
 
                         {/* Search Box */}
-                        <div className="p-4 border-b border-slate-100">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar alumno..."
-                                    autoFocus
-                                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                />
-                            </div>
+                        {/* Tabs */}
+                        <div className="flex border-b border-slate-100">
+                            <button
+                                onClick={() => setViewMode('list')}
+                                className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'list' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
+                            >
+                                Asistentes ({selectedSlot.attendeeIds?.length ?? 0})
+                            </button>
+                            <button
+                                onClick={() => setViewMode('add')}
+                                className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'add' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
+                            >
+                                Inscribir (+ New)
+                            </button>
                         </div>
 
-                        {/* Student List */}
+                        {/* Search Box (Only in Add mode) */}
+                        {viewMode === 'add' && (
+                            <div className="p-4 border-b border-slate-100">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar alumno para inscribir..."
+                                        autoFocus
+                                        className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Content Area */}
                         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                            {filteredStudents.length === 0 ? (
-                                <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
+                            {viewMode === 'list' ? (
+                                // --- LIST VIEW ---
+                                (!selectedSlot.attendeeIds || selectedSlot.attendeeIds.length === 0) ? (
+                                    <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                                        <Users className="w-12 h-12 mb-3 opacity-20" />
+                                        <p>No hay alumnos inscritos</p>
+                                        <button
+                                            onClick={() => setViewMode('add')}
+                                            className="mt-4 text-sky-600 font-bold hover:underline"
+                                        >
+                                            Inscribir al primero
+                                        </button>
+                                    </div>
+                                ) : (
+                                    selectedSlot.attendeeIds.map(studentId => {
+                                        const student = students.find(s => s.id === studentId);
+                                        if (!student) return null;
+                                        return (
+                                            <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors border border-transparent hover:border-slate-100">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center font-bold text-xs">
+                                                        {student.fullName.substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                        <p className="text-xs text-slate-400">{student.dni}</p>
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                    onClick={() => handleCancelBooking(student)}
+                                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                    title="Eliminar reserva"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        );
+                                    })
+                                )
                             ) : (
-                                filteredStudents.map(student => {
-                                    const isEnrolled = selectedSlot.attendeeIds?.includes(student.id);
-                                    const hasCredits = student.remainingCredits > 0;
-                                    const canBook = !isEnrolled && hasCredits;
+                                // --- ADD VIEW ---
+                                filteredStudents.length === 0 ? (
+                                    <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
+                                ) : (
+                                    filteredStudents.map(student => {
+                                        const isEnrolled = selectedSlot.attendeeIds?.includes(student.id);
+                                        const hasCredits = student.remainingCredits > 0;
+                                        const canBook = !isEnrolled && hasCredits;
 
-                                    return (
-                                        <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors">
-                                            <div>
-                                                <p className="font-bold text-slate-700">{student.fullName}</p>
-                                                <p className="text-xs text-slate-400">{student.dni}</p>
+                                        return (
+                                            <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors">
+                                                <div>
+                                                    <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                    <p className="text-xs text-slate-400">{student.dni}</p>
+                                                </div>
+
+                                                <div className="flex items-center gap-3">
+                                                    {student.hasDebt ? (
+                                                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 animate-pulse">
+                                                            DEUDA
+                                                        </span>
+                                                    ) : (
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                            {student.remainingCredits} créd.
+                                                        </span>
+                                                    )}
+
+                                                    {bookingLoading ? (
+                                                        <div className="w-8 h-8 flex items-center justify-center">...</div>
+                                                    ) : isEnrolled ? (
+                                                        <span className="text-xs text-emerald-600 font-bold px-2">Inscrito</span>
+                                                    ) : (
+                                                        <button
+                                                            disabled={!canBook || student.hasDebt}
+                                                            onClick={() => handleBooking(student)}
+                                                            className={`p-2 rounded-lg transition-colors ${canBook && !student.hasDebt
+                                                                ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
+                                                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                                }`}
+                                                        >
+                                                            {student.hasDebt ? <DollarSign className="w-5 h-5" /> : (hasCredits ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />)}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-
-                                            <div className="flex items-center gap-3">
-                                                {student.hasDebt ? (
-                                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 animate-pulse">
-                                                        TIENE DEUDA
-                                                    </span>
-                                                ) : (
-                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                        {student.remainingCredits} créd.
-                                                    </span>
-                                                )}
-
-                                                {bookingLoading ? (
-                                                    <div className="w-8 h-8 flex items-center justify-center">...</div>
-                                                ) : isEnrolled ? (
-                                                    <button disabled className="p-2 text-emerald-600 bg-emerald-50 rounded-lg opacity-50 cursor-not-allowed">
-                                                        <CheckCircle className="w-5 h-5" />
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        disabled={!canBook || student.hasDebt}
-                                                        onClick={() => handleBooking(student)}
-                                                        className={`p-2 rounded-lg transition-colors ${canBook && !student.hasDebt
-                                                            ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
-                                                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                            }`}
-                                                    >
-                                                        {student.hasDebt ? <DollarSign className="w-5 h-5" /> : (hasCredits ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />)}
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })
+                                        );
+                                    })
+                                )
                             )}
                         </div>
 

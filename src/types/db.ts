@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'ASSISTANT';
 export type PaymentMethod = 'YAPE' | 'CASH';
 export type PaymentType = 'FULL' | 'PARTIAL';
 export type DebtStatus = 'PENDING' | 'PAID' | 'CANCELLED';
-export type StudentCategory = 'Niños' | 'Adolescentes' | 'Adultos';
+export type StudentCategory = 'Aquabebe' | '4 a 6' | '7 a 10' | '11 a 15' | '16 a más' | 'Adultos';
 
 // --- GRUPO A: CONFIGURACIÓN MAESTRA ---
 export interface ScheduleSeason {
@@ -30,6 +30,7 @@ export interface ScheduleRule {
     timeId: string; // "06-07"
     dayIds: string[]; // ["LUN", "MIE", "VIE"]
     capacity: number;
+    allowedAges: number[]; // [16, 17, ...]
 }
 
 // --- GRUPO B: OPERACIÓN DIARIA ---

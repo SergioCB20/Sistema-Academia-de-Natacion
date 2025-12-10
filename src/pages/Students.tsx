@@ -17,7 +17,7 @@ import {
     Printer
 } from 'lucide-react';
 import { studentService } from '../services/students';
-import { DAYS, HOURS } from '../services/master';
+import { DAYS, HOURS, SCHEDULE_RULES } from '../services/master';
 import type { Student, PaymentMethod, Debt, StudentCategory } from '../types/db';
 
 export default function Students() {
@@ -77,7 +77,7 @@ export default function Students() {
 
     const handleCreateNew = () => {
         setEditingStudent(null);
-        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', category: 'Niños' });
+        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', category: '7 a 10' });
         setFixedSchedule([]);
         setPaymentData({ amountPaid: '', totalCost: '0.00', credits: '12', method: 'CASH' });
         setStep(1);
@@ -93,7 +93,7 @@ export default function Students() {
             email: student.email || '',
             birthDate: student.birthDate || '',
             age: student.age ? String(student.age) : '',
-            category: student.category || 'Niños'
+            category: student.category || '7 a 10'
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
@@ -218,8 +218,11 @@ export default function Students() {
 
     const getCategoryColor = (cat: StudentCategory) => {
         switch (cat) {
-            case 'Niños': return 'bg-orange-100 text-orange-700';
-            case 'Adolescentes': return 'bg-purple-100 text-purple-700';
+            case 'Aquabebe': return 'bg-pink-100 text-pink-700';
+            case '4 a 6': return 'bg-yellow-100 text-yellow-700';
+            case '7 a 10': return 'bg-orange-100 text-orange-700';
+            case '11 a 15': return 'bg-purple-100 text-purple-700';
+            case '16 a más': return 'bg-teal-100 text-teal-700';
             case 'Adultos': return 'bg-blue-100 text-blue-700';
             default: return 'bg-slate-100 text-slate-500';
         }
@@ -231,6 +234,24 @@ export default function Students() {
     );
 
     const debtAmount = Number(paymentData.totalCost) - Number(paymentData.amountPaid);
+
+    // Auto-calculate category from age
+    const getCategoryFromAge = (age: number): StudentCategory => {
+        if (age >= 18) return 'Adultos';
+        if (age >= 16) return '16 a más';
+        if (age >= 11) return '11 a 15';
+        if (age >= 7) return '7 a 10';
+        if (age >= 4) return '4 a 6';
+        if (age >= 1) return 'Aquabebe';
+        return '7 a 10'; // Default
+    };
+
+    // Handle age change and auto-update category
+    const handleAgeChange = (ageValue: string) => {
+        const age = parseInt(ageValue);
+        const newCategory = !isNaN(age) && age >= 1 ? getCategoryFromAge(age) : '7 a 10';
+        setFormData({ ...formData, age: ageValue, category: newCategory });
+    };
 
     const handleNextStep = () => {
         if (step === 1) {
@@ -245,6 +266,14 @@ export default function Students() {
             }
         }
         setStep(step + 1);
+    };
+
+    const handlePrevStep = () => {
+        if (step === 2) {
+            // Clear selected schedules when going back from step 2
+            setFixedSchedule([]);
+        }
+        setStep(step - 1);
     };
 
     return (
@@ -324,10 +353,10 @@ export default function Students() {
                             </div>
 
                             <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                <span className={`inline - block px - 3 py - 1 rounded - full text - xs font - bold ${student.remainingCredits > 0
+                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${student.remainingCredits > 0
                                     ? 'bg-emerald-100 text-emerald-700'
                                     : 'bg-slate-100 text-slate-500'
-                                    } `}>
+                                    }`}>
                                     {student.remainingCredits} Clases
                                 </span>
 
@@ -359,9 +388,9 @@ export default function Students() {
 
                         {/* Steps Indicator */}
                         <div className="flex p-4 gap-2">
-                            <div className={`h - 1 flex - 1 rounded - full ${step >= 1 ? 'bg-sky-600' : 'bg-slate-200'} `} />
-                            <div className={`h - 1 flex - 1 rounded - full ${step >= 2 ? 'bg-sky-600' : 'bg-slate-200'} `} />
-                            <div className={`h - 1 flex - 1 rounded - full ${step >= 3 ? 'bg-sky-600' : 'bg-slate-200'} `} />
+                            <div className={`h-1 flex-1 rounded-full ${step >= 1 ? 'bg-sky-600' : 'bg-slate-200'}`} />
+                            <div className={`h-1 flex-1 rounded-full ${step >= 2 ? 'bg-sky-600' : 'bg-slate-200'}`} />
+                            <div className={`h-1 flex-1 rounded-full ${step >= 3 ? 'bg-sky-600' : 'bg-slate-200'}`} />
                         </div>
 
                         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
@@ -379,7 +408,7 @@ export default function Students() {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Edad</label>
                                         <input type="number" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                            value={formData.age} onChange={e => setFormData({ ...formData, age: e.target.value })}
+                                            value={formData.age} onChange={e => handleAgeChange(e.target.value)}
                                             placeholder="Ej. 6"
                                         />
                                     </div>
@@ -401,16 +430,13 @@ export default function Students() {
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Categoría</label>
-                                            <select
-                                                className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white"
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Categoría <span className="text-slate-300 font-normal">(Auto)</span></label>
+                                            <input
+                                                type="text"
+                                                disabled
+                                                className="w-full px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
                                                 value={formData.category}
-                                                onChange={e => setFormData({ ...formData, category: e.target.value as StudentCategory })}
-                                            >
-                                                <option value="Niños">Niños</option>
-                                                <option value="Adolescentes">Adolescentes</option>
-                                                <option value="Adultos">Adultos</option>
-                                            </select>
+                                            />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-slate-700 mb-1">Email <span className="text-slate-300 font-normal">(Opcional)</span></label>
@@ -434,29 +460,82 @@ export default function Students() {
                                             <div key={d.id} className="p-2 text-center font-bold text-slate-600 bg-slate-50 rounded">{d.id}</div>
                                         ))}
 
-                                        {HOURS.map(h => (
-                                            <div key={h.id} className="contents">
-                                                <div className="p-2 font-mono text-slate-400 whitespace-nowrap flex items-center justify-end pr-4">
-                                                    {h.label.split(' - ')[0]}
+                                        {HOURS.map(h => {
+                                            const ageNum = parseInt(formData.age);
+
+                                            return (
+                                                <div key={h.id} className="contents">
+                                                    <div className="p-2 font-mono text-slate-400 whitespace-nowrap flex flex-col justify-center items-end pr-4 h-[60px]">
+                                                        <span className="text-xs">{h.label.split(' - ')[0]}</span>
+                                                    </div>
+                                                    {DAYS.map(d => {
+                                                        const isSelected = fixedSchedule.some(s => s.dayId === d.id && s.timeId === h.id);
+
+                                                        // Find the specific rule for this day/time combination
+                                                        const rule = SCHEDULE_RULES.find(r => r.timeId === h.id && r.dayIds.includes(d.id));
+                                                        const allowedAges = rule?.allowedAges || [];
+                                                        const capacity = rule?.capacity ?? 0;
+
+                                                        // Check if there's no rule for this slot (e.g., weekends after 17:30)
+                                                        const hasNoRule = !rule;
+
+                                                        // Check if age is restricted for this specific slot
+                                                        const isAgeRestricted = !isNaN(ageNum) && allowedAges.length > 0 && !allowedAges.includes(ageNum);
+                                                        const isBreakSlot = capacity === 0;
+
+                                                        // Calculate LIVE capacity
+                                                        const currentCount = students.filter(s =>
+                                                            s.active &&
+                                                            s.fixedSchedule?.some(fs => fs.dayId === d.id && fs.timeId === h.id)
+                                                        ).length;
+
+                                                        const isFull = currentCount >= capacity;
+                                                        const isDisabled = hasNoRule || isBreakSlot || isAgeRestricted || (isFull && !isSelected);
+
+                                                        // Get age range label
+                                                        const getAgeLabel = () => {
+                                                            if (hasNoRule || isBreakSlot) return '';
+                                                            if (allowedAges.length === 0) return '';
+                                                            const minAge = Math.min(...allowedAges);
+                                                            const maxAge = Math.max(...allowedAges);
+                                                            if (minAge <= 3) return 'Aquabebe';
+                                                            if (maxAge >= 16) return '16+';
+                                                            return `${minAge}-${maxAge}`;
+                                                        };
+
+                                                        return (
+                                                            <button
+                                                                key={`${d.id}_${h.id}`}
+                                                                type="button"
+                                                                disabled={isDisabled}
+                                                                onClick={() => toggleSlot(d.id, h.id)}
+                                                                className={`
+                                                                    h-[55px] p-1 rounded border transition-all flex flex-col items-center justify-center gap-0.5 relative overflow-hidden
+                                                                    ${isSelected
+                                                                        ? 'bg-sky-600 text-white border-sky-600 shadow-md transform scale-105 z-10'
+                                                                        : isDisabled
+                                                                            ? 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed opacity-60'
+                                                                            : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:border-emerald-300 hover:shadow-sm'
+                                                                    }
+                                                                `}
+                                                            >
+                                                                {isSelected && <CheckCircle className="w-3 h-3" />}
+                                                                {!isSelected && !isDisabled && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+
+                                                                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-sky-100' : isDisabled ? 'text-slate-300' : 'text-emerald-600/70'}`}>
+                                                                    {hasNoRule ? '-' : `${currentCount}/${capacity}`}
+                                                                </span>
+                                                                {!hasNoRule && !isBreakSlot && (
+                                                                    <span className={`text-[8px] font-medium ${isSelected ? 'text-sky-200' : isDisabled ? 'text-slate-300' : 'text-emerald-500/60'}`}>
+                                                                        {getAgeLabel()}
+                                                                    </span>
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
-                                                {DAYS.map(d => {
-                                                    const isSelected = fixedSchedule.some(s => s.dayId === d.id && s.timeId === h.id);
-                                                    return (
-                                                        <button
-                                                            key={`${d.id}_${h.id} `}
-                                                            type="button"
-                                                            onClick={() => toggleSlot(d.id, h.id)}
-                                                            className={`p - 2 rounded border transition - colors flex items - center justify - center ${isSelected
-                                                                ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
-                                                                : 'bg-white text-transparent border-slate-100 hover:border-sky-300 hover:bg-sky-50'
-                                                                } `}
-                                                        >
-                                                            <CheckCircle className="w-4 h-4" />
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                     <p className="text-sm text-right text-slate-500 font-bold">{fixedSchedule.length} Clases / semana</p>
                                 </div>
@@ -533,7 +612,7 @@ export default function Students() {
                         {/* Footer / Navigation */}
                         <div className="p-4 border-t border-slate-100 flex justify-between bg-slate-50/50">
                             {step > 1 ? (
-                                <button type="button" onClick={() => setStep(step - 1)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium flex items-center gap-2">
+                                <button type="button" onClick={handlePrevStep} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium flex items-center gap-2">
                                     <ArrowLeft className="w-4 h-4" /> Anterior
                                 </button>
                             ) : (
