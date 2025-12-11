@@ -3,8 +3,69 @@ export type PaymentMethod = 'YAPE' | 'CASH';
 export type PaymentType = 'FULL' | 'PARTIAL';
 export type DebtStatus = 'PENDING' | 'PAID' | 'CANCELLED';
 export type StudentCategory = 'Aquabebe' | '4 a 6' | '7 a 10' | '11 a 15' | '16 a más' | 'Adultos';
+export type SeasonType = 'summer' | 'winter';
+export type DayType = 'lun-mier-vier' | 'mar-juev' | 'sab-dom';
 
 // --- GRUPO A: CONFIGURACIÓN MAESTRA ---
+
+// New Season Management System
+export interface Season {
+    id: string;
+    name: string; // "Verano 2026"
+    type: SeasonType;
+    startDate: Date;
+    endDate: Date;
+    workingHours: {
+        start: string; // "06:00"
+        end: string; // "21:30"
+    };
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface Category {
+    id: string;
+    name: string; // "Aquabebe", "4 a 6 años", etc.
+    ageRange: {
+        min: number;
+        max: number;
+    };
+    description?: string; // "1 año o 3 años"
+    color?: string; // For UI badges
+    order: number; // Display order
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface Package {
+    id: string;
+    seasonId: string; // Reference to Season
+    name: string; // "8 clases x mes"
+    classesPerMonth: number; // 8, 12, 16, 24
+    duration: number; // 1 or 2 months
+    price: number;
+    scheduleTypes: DayType[]; // ["lun-mier-vier", "mar-juev"]
+    applicableCategories: string[]; // Category IDs or ["all"]
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ScheduleTemplate {
+    id: string;
+    seasonId: string;
+    dayType: DayType;
+    timeSlot: string; // "06:00-07:00"
+    categoryId: string; // Reference to Category
+    capacity: number;
+    isBreak: boolean; // For rest periods like 2:00-2:30
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+// Legacy interfaces (keep for backward compatibility if needed)
 export interface ScheduleSeason {
     id: string; // e.g., "verano-2026"
     name: string; // "Verano 2026"
@@ -42,14 +103,29 @@ export interface SlotLock {
 
 export interface DailySlot {
     id: string; // "2025-01-20_10-11"
-    date: string; // "2025-01-20"
+    date: string | Date; // "2025-01-20" or Date object
     timeId: string; // "10-11"
+    scheduleTemplateId?: string; // Reference to ScheduleTemplate (new system)
+    seasonId?: string; // Reference to Season (new system)
+    categoryId?: string; // Reference to Category (new system)
+    timeSlot?: string; // "06:00-07:00" (new system)
     capacity: number;
     attendeeIds: string[]; // Array of student IDs
     locks: SlotLock[];
+    isBreak?: boolean; // For rest periods
+    createdAt?: Date;
+    updatedAt?: Date;
 }
 
 // --- GRUPO C: ENTIDADES DE NEGOCIO ---
+export interface PackageHistory {
+    packageId: string;
+    startDate: Date;
+    endDate: Date;
+    classesRemaining: number;
+    classesTotal: number;
+}
+
 export interface Student {
     id: string; // DNI
     fullName: string;
@@ -59,7 +135,10 @@ export interface Student {
     remainingCredits: number;
     hasDebt: boolean;
     fixedSchedule: Array<{ dayId: string; timeId: string }>; // Array of slots ID: "LUN_07-08" or object
-    category: StudentCategory;
+    category: StudentCategory; // Legacy field
+    categoryId?: string; // Reference to Category (new system)
+    currentPackageId?: string; // Reference to current Package
+    packageHistory?: PackageHistory[]; // History of packages
     email?: string; // Optional context
     createdAt: number; // Timestamp
     birthDate: string; // YYYY-MM-DD

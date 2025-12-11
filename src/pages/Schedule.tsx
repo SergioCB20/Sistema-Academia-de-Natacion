@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign, Trash2 } from 'lucide-react';
 import { scheduleService } from '../services/schedule';
 import { dateUtils } from '../utils/date';
-import { masterService, HOURS } from '../services/master';
 import { studentService } from '../services/students';
 import type { DailySlot, Student } from '../types/db';
 
@@ -11,8 +10,6 @@ export default function Schedule() {
     const [slots, setSlots] = useState<DailySlot[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
-    const [seeding, setSeeding] = useState(false);
-
     // Modal State
     // Modal State
     const [selectedSlot, setSelectedSlot] = useState<DailySlot | null>(null);
@@ -73,21 +70,6 @@ export default function Schedule() {
         setCurrentDate(newDate);
     };
 
-    const handleSeed = async () => {
-        if (!confirm("Esto generará horarios para esta semana. ¿Continuar?")) return;
-        setSeeding(true);
-        try {
-            await masterService.generateSlots(weekStart, 7);
-            await loadData(); // Reload all
-            alert(`Horarios generados correctamente.\nSemana: ${dateUtils.formatDateId(weekStart)}`);
-        } catch (error) {
-            console.error(error);
-            alert("Error al generar horarios");
-        } finally {
-            setSeeding(false);
-        }
-    };
-
     const openBookingModal = (slot: DailySlot) => {
         setSelectedSlot(slot);
         setSearchTerm('');
@@ -144,9 +126,7 @@ export default function Schedule() {
         }
     };
 
-    const getSlot = (dateStr: string, timeId: string) => {
-        return slots.find(s => s.date === dateStr && s.timeId === timeId);
-    };
+
 
     const getStatusColor = (capacity: number, attendees: number) => {
         const ratio = attendees / capacity;
@@ -154,6 +134,18 @@ export default function Schedule() {
         if (ratio >= 0.8) return 'bg-amber-50 text-amber-700 border-amber-200';
         return 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm';
     };
+
+    // Derived state: Get unique time slots from loaded data
+    const timeRows = Array.from(new Set(slots.map(s => s.timeSlot || s.timeId)))
+        .sort((a, b) => a.localeCompare(b))
+        .map(timeId => {
+            // Find a slot with this ID to get the label/details if needed
+            const sample = slots.find(s => s.timeSlot === timeId || s.timeId === timeId);
+            return {
+                id: timeId,
+                label: sample?.timeSlot || timeId
+            };
+        });
 
     return (
         <div className="space-y-6 h-[calc(100vh-100px)] flex flex-col">
@@ -179,15 +171,6 @@ export default function Schedule() {
                         <ChevronRight className="w-5 h-5" />
                     </button>
                 </div>
-
-                <button
-                    onClick={handleSeed}
-                    disabled={seeding}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-mono disabled:opacity-50"
-                >
-                    <RefreshCw className={`w-3 h-3 ${seeding ? 'animate-spin' : ''}`} />
-                    {seeding ? 'Generando...' : 'Generar Horarios (Debug)'}
-                </button>
             </div>
 
             {/* Calendar Grid */}
@@ -216,51 +199,70 @@ export default function Schedule() {
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-100">
-                        {HOURS.map(hour => (
-                            <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
-                                <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
-                                    {hour.label.split(' - ')[0]}
-                                </div>
-                                {weekDays.map((day, i) => {
-                                    const dateStr = dateUtils.formatDateId(day);
-                                    const slot = getSlot(dateStr, hour.id);
-
-                                    if (!slot) return (
-                                        <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]"></div>
-                                    );
-
-                                    const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
-                                    const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
-                                    const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
-
-                                    return (
-                                        <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
-                                            <button
-                                                onClick={() => openBookingModal(slot)}
-                                                className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${colorClass} ${hasDebtor ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
-                                            >
-                                                <div className="flex items-center justify-between w-full">
-                                                    <span className="text-[10px] font-bold opacity-70">
-                                                        {hour.label.split(' - ')[0]}
-                                                    </span>
-                                                    {isFull && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
-                                                </div>
-
-                                                <div className="flex items-center gap-1.5 self-end">
-                                                    {hasDebtor && (
-                                                        <DollarSign className="w-3 h-3 text-red-600 animate-pulse" />
-                                                    )}
-                                                    <Users className="w-3 h-3" />
-                                                    <span className="text-xs font-bold font-mono">
-                                                        {slot.attendeeIds?.length ?? 0}/{slot.capacity}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        </div>
-                                    );
-                                })}
+                        {timeRows.length === 0 ? (
+                            <div className="p-12 text-center text-slate-400 col-span-8">
+                                No hay horarios generados para esta semana.
                             </div>
-                        ))}
+                        ) : (
+                            timeRows.map(hour => (
+                                <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
+                                    <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
+                                        {hour.label.split(' - ')[0]}
+                                    </div>
+                                    {weekDays.map((day, i) => {
+                                        const dateStr = dateUtils.formatDateId(day);
+                                        // Match by timeSlot or timeId
+                                        const slot = slots.find(s => s.date === dateStr && (s.timeSlot === hour.id || s.timeId === hour.id));
+
+                                        if (!slot) return (
+                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]"></div>
+                                        );
+
+                                        if (slot.isBreak) {
+                                            return (
+                                                <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
+                                                    <div className="w-full h-full rounded-lg bg-slate-100 border border-slate-200 p-2 flex flex-col justify-center items-center opacity-75 cursor-not-allowed">
+                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                            Descanso
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+
+                                        const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
+                                        const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
+                                        const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
+
+                                        return (
+                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
+                                                <button
+                                                    onClick={() => openBookingModal(slot)}
+                                                    className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${colorClass} ${hasDebtor ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
+                                                >
+                                                    <div className="flex items-center justify-between w-full">
+                                                        <span className="text-[10px] font-bold opacity-70">
+                                                            {hour.label.split(' - ')[0]}
+                                                        </span>
+                                                        {isFull && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1.5 self-end">
+                                                        {hasDebtor && (
+                                                            <DollarSign className="w-3 h-3 text-red-600 animate-pulse" />
+                                                        )}
+                                                        <Users className="w-3 h-3" />
+                                                        <span className="text-xs font-bold font-mono">
+                                                            {slot.attendeeIds?.length ?? 0}/{slot.capacity}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))
+                        )}
                     </div>
                 )}
             </div>
@@ -274,7 +276,7 @@ export default function Schedule() {
                             <div>
                                 <h3 className="font-bold text-slate-800">Reservar Clase</h3>
                                 <p className="text-sm text-slate-500">
-                                    {selectedSlot.timeId} • {selectedSlot.date}
+                                    {selectedSlot.timeId} • {typeof selectedSlot.date === 'string' ? selectedSlot.date : selectedSlot.date.toLocaleDateString('es-PE')}
                                 </p>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
