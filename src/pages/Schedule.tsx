@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign, Trash2 } from 'lucide-react';
 import { scheduleService } from '../services/schedule';
-import { masterService, HOURS } from '../services/master';
+import { dateUtils } from '../utils/date';
 import { studentService } from '../services/students';
 import type { DailySlot, Student } from '../types/db';
 
@@ -10,11 +10,11 @@ export default function Schedule() {
     const [slots, setSlots] = useState<DailySlot[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
-    const [seeding, setSeeding] = useState(false);
-
+    // Modal State
     // Modal State
     const [selectedSlot, setSelectedSlot] = useState<DailySlot | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [bookingLoading, setBookingLoading] = useState(false);
 
@@ -40,8 +40,8 @@ export default function Schedule() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const startStr = weekDays[0].toISOString().split('T')[0];
-            const endStr = weekDays[6].toISOString().split('T')[0];
+            const startStr = dateUtils.formatDateId(weekDays[0]);
+            const endStr = dateUtils.formatDateId(weekDays[6]);
 
             // Parallel fetch
             const [slotsData, studentsData] = await Promise.all([
@@ -70,24 +70,10 @@ export default function Schedule() {
         setCurrentDate(newDate);
     };
 
-    const handleSeed = async () => {
-        if (!confirm("Esto generará horarios para esta semana. ¿Continuar?")) return;
-        setSeeding(true);
-        try {
-            await masterService.generateSlots(weekStart, 7);
-            await loadData(); // Reload all
-            alert("Horarios generados correctamente");
-        } catch (error) {
-            console.error(error);
-            alert("Error al generar horarios");
-        } finally {
-            setSeeding(false);
-        }
-    };
-
     const openBookingModal = (slot: DailySlot) => {
         setSelectedSlot(slot);
         setSearchTerm('');
+        setViewMode('list');
         setIsModalOpen(true);
     };
 
@@ -113,15 +99,34 @@ export default function Schedule() {
         }
     };
 
-    // Filter students for search
     const filteredStudents = students.filter(s =>
         s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.dni.includes(searchTerm)
     );
 
-    const getSlot = (dateStr: string, timeId: string) => {
-        return slots.find(s => s.date === dateStr && s.timeId === timeId);
+    const handleCancelBooking = async (student: Student) => {
+        if (!selectedSlot) return;
+
+        if (!confirm(`¿Eliminar a ${student.fullName} de esta clase?`)) return;
+
+        setBookingLoading(true);
+        try {
+            await scheduleService.cancelBooking(selectedSlot.id, student.id);
+            await loadData();
+            // Update the selected slot with new data
+            const updatedSlot = slots.find(s => s.id === selectedSlot.id);
+            if (updatedSlot) {
+                setSelectedSlot({ ...updatedSlot, attendeeIds: updatedSlot.attendeeIds.filter(id => id !== student.id) });
+            }
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Error al cancelar reserva");
+        } finally {
+            setBookingLoading(false);
+        }
     };
+
+
 
     const getStatusColor = (capacity: number, attendees: number) => {
         const ratio = attendees / capacity;
@@ -130,13 +135,25 @@ export default function Schedule() {
         return 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm';
     };
 
+    // Derived state: Get unique time slots from loaded data
+    const timeRows = Array.from(new Set(slots.map(s => s.timeSlot || s.timeId)))
+        .sort((a, b) => a.localeCompare(b))
+        .map(timeId => {
+            // Find a slot with this ID to get the label/details if needed
+            const sample = slots.find(s => s.timeSlot === timeId || s.timeId === timeId);
+            return {
+                id: timeId,
+                label: sample?.timeSlot || timeId
+            };
+        });
+
     return (
         <div className="space-y-6 h-[calc(100vh-100px)] flex flex-col">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                 <div>
                     <h2 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
-                        <Calendar className="w-8 h-8 text-sky-600" />
+                        <CalendarIcon className="w-8 h-8 text-sky-600" />
                         Horarios
                     </h2>
                     <p className="text-slate-500">Gestión de reservas y asistencia</p>
@@ -154,15 +171,6 @@ export default function Schedule() {
                         <ChevronRight className="w-5 h-5" />
                     </button>
                 </div>
-
-                <button
-                    onClick={handleSeed}
-                    disabled={seeding}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-mono disabled:opacity-50"
-                >
-                    <RefreshCw className={`w-3 h-3 ${seeding ? 'animate-spin' : ''}`} />
-                    {seeding ? 'Generando...' : 'Generar Horarios (Debug)'}
-                </button>
             </div>
 
             {/* Calendar Grid */}
@@ -191,51 +199,70 @@ export default function Schedule() {
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-100">
-                        {HOURS.map(hour => (
-                            <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
-                                <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
-                                    {hour.label.split(' - ')[0]}
-                                </div>
-                                {weekDays.map((day, i) => {
-                                    const dateStr = day.toISOString().split('T')[0];
-                                    const slot = getSlot(dateStr, hour.id);
-
-                                    if (!slot) return (
-                                        <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]"></div>
-                                    );
-
-                                    const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
-                                    const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
-                                    const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
-
-                                    return (
-                                        <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
-                                            <button
-                                                onClick={() => openBookingModal(slot)}
-                                                className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${colorClass} ${hasDebtor ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
-                                            >
-                                                <div className="flex items-center justify-between w-full">
-                                                    <span className="text-[10px] font-bold opacity-70">
-                                                        {hour.label.split(' - ')[0]}
-                                                    </span>
-                                                    {isFull && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
-                                                </div>
-
-                                                <div className="flex items-center gap-1.5 self-end">
-                                                    {hasDebtor && (
-                                                        <DollarSign className="w-3 h-3 text-red-600 animate-pulse" />
-                                                    )}
-                                                    <Users className="w-3 h-3" />
-                                                    <span className="text-xs font-bold font-mono">
-                                                        {slot.attendeeIds?.length ?? 0}/{slot.capacity}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        </div>
-                                    );
-                                })}
+                        {timeRows.length === 0 ? (
+                            <div className="p-12 text-center text-slate-400 col-span-8">
+                                No hay horarios generados para esta semana.
                             </div>
-                        ))}
+                        ) : (
+                            timeRows.map(hour => (
+                                <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
+                                    <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
+                                        {hour.label.split(' - ')[0]}
+                                    </div>
+                                    {weekDays.map((day, i) => {
+                                        const dateStr = dateUtils.formatDateId(day);
+                                        // Match by timeSlot or timeId
+                                        const slot = slots.find(s => s.date === dateStr && (s.timeSlot === hour.id || s.timeId === hour.id));
+
+                                        if (!slot) return (
+                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]"></div>
+                                        );
+
+                                        if (slot.isBreak) {
+                                            return (
+                                                <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
+                                                    <div className="w-full h-full rounded-lg bg-slate-100 border border-slate-200 p-2 flex flex-col justify-center items-center opacity-75 cursor-not-allowed">
+                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                            Descanso
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+
+                                        const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
+                                        const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
+                                        const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
+
+                                        return (
+                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
+                                                <button
+                                                    onClick={() => openBookingModal(slot)}
+                                                    className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${colorClass} ${hasDebtor ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
+                                                >
+                                                    <div className="flex items-center justify-between w-full">
+                                                        <span className="text-[10px] font-bold opacity-70">
+                                                            {hour.label.split(' - ')[0]}
+                                                        </span>
+                                                        {isFull && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1.5 self-end">
+                                                        {hasDebtor && (
+                                                            <DollarSign className="w-3 h-3 text-red-600 animate-pulse" />
+                                                        )}
+                                                        <Users className="w-3 h-3" />
+                                                        <span className="text-xs font-bold font-mono">
+                                                            {slot.attendeeIds?.length ?? 0}/{slot.capacity}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))
+                        )}
                     </div>
                 )}
             </div>
@@ -249,77 +276,139 @@ export default function Schedule() {
                             <div>
                                 <h3 className="font-bold text-slate-800">Reservar Clase</h3>
                                 <p className="text-sm text-slate-500">
-                                    {selectedSlot.timeId} • {selectedSlot.date}
+                                    {selectedSlot.timeId} • {typeof selectedSlot.date === 'string' ? selectedSlot.date : selectedSlot.date.toLocaleDateString('es-PE')}
                                 </p>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
                         </div>
 
                         {/* Search Box */}
-                        <div className="p-4 border-b border-slate-100">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar alumno..."
-                                    autoFocus
-                                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                />
-                            </div>
+                        {/* Tabs */}
+                        <div className="flex border-b border-slate-100">
+                            <button
+                                onClick={() => setViewMode('list')}
+                                className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'list' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
+                            >
+                                Asistentes ({selectedSlot.attendeeIds?.length ?? 0})
+                            </button>
+                            <button
+                                onClick={() => setViewMode('add')}
+                                className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'add' ? 'text-sky-600 border-b-2 border-sky-600' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
+                            >
+                                Inscribir (+ New)
+                            </button>
                         </div>
 
-                        {/* Student List */}
+                        {/* Search Box (Only in Add mode) */}
+                        {viewMode === 'add' && (
+                            <div className="p-4 border-b border-slate-100">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar alumno para inscribir..."
+                                        autoFocus
+                                        className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Content Area */}
                         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                            {filteredStudents.length === 0 ? (
-                                <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
+                            {viewMode === 'list' ? (
+                                // --- LIST VIEW ---
+                                (!selectedSlot.attendeeIds || selectedSlot.attendeeIds.length === 0) ? (
+                                    <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                                        <Users className="w-12 h-12 mb-3 opacity-20" />
+                                        <p>No hay alumnos inscritos</p>
+                                        <button
+                                            onClick={() => setViewMode('add')}
+                                            className="mt-4 text-sky-600 font-bold hover:underline"
+                                        >
+                                            Inscribir al primero
+                                        </button>
+                                    </div>
+                                ) : (
+                                    selectedSlot.attendeeIds.map(studentId => {
+                                        const student = students.find(s => s.id === studentId);
+                                        if (!student) return null;
+                                        return (
+                                            <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors border border-transparent hover:border-slate-100">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center font-bold text-xs">
+                                                        {student.fullName.substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                        <p className="text-xs text-slate-400">{student.dni}</p>
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                    onClick={() => handleCancelBooking(student)}
+                                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                    title="Eliminar reserva"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        );
+                                    })
+                                )
                             ) : (
-                                filteredStudents.map(student => {
-                                    const isEnrolled = selectedSlot.attendeeIds?.includes(student.id);
-                                    const hasCredits = student.remainingCredits > 0;
-                                    const canBook = !isEnrolled && hasCredits;
+                                // --- ADD VIEW ---
+                                filteredStudents.length === 0 ? (
+                                    <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
+                                ) : (
+                                    filteredStudents.map(student => {
+                                        const isEnrolled = selectedSlot.attendeeIds?.includes(student.id);
+                                        const hasCredits = student.remainingCredits > 0;
+                                        const canBook = !isEnrolled && hasCredits;
 
-                                    return (
-                                        <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors">
-                                            <div>
-                                                <p className="font-bold text-slate-700">{student.fullName}</p>
-                                                <p className="text-xs text-slate-400">{student.dni}</p>
+                                        return (
+                                            <div key={student.id} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl group transition-colors">
+                                                <div>
+                                                    <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                    <p className="text-xs text-slate-400">{student.dni}</p>
+                                                </div>
+
+                                                <div className="flex items-center gap-3">
+                                                    {student.hasDebt ? (
+                                                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 animate-pulse">
+                                                            DEUDA
+                                                        </span>
+                                                    ) : (
+                                                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                            {student.remainingCredits} créd.
+                                                        </span>
+                                                    )}
+
+                                                    {bookingLoading ? (
+                                                        <div className="w-8 h-8 flex items-center justify-center">...</div>
+                                                    ) : isEnrolled ? (
+                                                        <span className="text-xs text-emerald-600 font-bold px-2">Inscrito</span>
+                                                    ) : (
+                                                        <button
+                                                            disabled={!canBook || student.hasDebt}
+                                                            onClick={() => handleBooking(student)}
+                                                            className={`p-2 rounded-lg transition-colors ${canBook && !student.hasDebt
+                                                                ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
+                                                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                                }`}
+                                                        >
+                                                            {student.hasDebt ? <DollarSign className="w-5 h-5" /> : (hasCredits ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />)}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
-
-                                            <div className="flex items-center gap-3">
-                                                {student.hasDebt ? (
-                                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 animate-pulse">
-                                                        TIENE DEUDA
-                                                    </span>
-                                                ) : (
-                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                        {student.remainingCredits} créd.
-                                                    </span>
-                                                )}
-
-                                                {bookingLoading ? (
-                                                    <div className="w-8 h-8 flex items-center justify-center">...</div>
-                                                ) : isEnrolled ? (
-                                                    <button disabled className="p-2 text-emerald-600 bg-emerald-50 rounded-lg opacity-50 cursor-not-allowed">
-                                                        <CheckCircle className="w-5 h-5" />
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        disabled={!canBook || student.hasDebt}
-                                                        onClick={() => handleBooking(student)}
-                                                        className={`p-2 rounded-lg transition-colors ${canBook && !student.hasDebt
-                                                            ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
-                                                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                            }`}
-                                                    >
-                                                        {student.hasDebt ? <DollarSign className="w-5 h-5" /> : (hasCredits ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />)}
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })
+                                        );
+                                    })
+                                )
                             )}
                         </div>
 

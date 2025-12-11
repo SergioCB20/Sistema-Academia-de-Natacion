@@ -169,7 +169,7 @@ export const scheduleService = {
 
             // 1. Remove from attendees
             const newAttendees = slot.attendeeIds.filter(id => id !== studentId);
-            transaction.update(slotRef, { attendees: newAttendees });
+            transaction.update(slotRef, { attendeeIds: newAttendees });
 
             // 2. Refund Credit
             // TODO: Add Valid cancellation window check (e.g., up to 2 hours before)

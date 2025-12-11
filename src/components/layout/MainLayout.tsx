@@ -1,26 +1,43 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, DollarSign, Menu, LogOut, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, DollarSign, Menu, LogOut, CreditCard, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { SeasonSelector } from '../season/SeasonSelector';
 // import { auth } from '../../lib/firebase';
 // import { signOut } from 'firebase/auth'; // Uncomment when auth is fully ready
+
+import { useAuth } from '../../context/AuthContext';
+
+// ...
 
 export default function MainLayout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const navigate = useNavigate();
+    const { role, logout } = useAuth();
 
     const handleLogout = async () => {
-        // await signOut(auth);
+        await logout();
         navigate('/login');
     };
 
     const navItems = [
-        { to: '/', icon: LayoutDashboard, label: 'Panel' },
+        { to: '/', icon: LayoutDashboard, label: 'Panel', roles: ['ADMIN'] },
         { to: '/alumnos', icon: Users, label: 'Alumnos' },
         { to: '/horarios', icon: Calendar, label: 'Horarios' },
-        { to: '/caja', icon: DollarSign, label: 'Caja' },
+        { to: '/caja', icon: DollarSign, label: 'Caja', roles: ['ADMIN'] },
         { to: '/carnet', icon: CreditCard, label: 'Carnet' },
     ];
+
+    const adminItems = [
+        { to: '/admin/temporadas', icon: Calendar, label: 'Temporadas' },
+        { to: '/admin/categorias', icon: Users, label: 'Categorías' },
+        { to: '/admin/paquetes', icon: DollarSign, label: 'Paquetes' },
+        { to: '/admin/plantillas', icon: Settings, label: 'Plantilla de Horario' },
+    ];
+
+    const filteredNavItems = navItems.filter(item =>
+        !item.roles || (role && item.roles.includes(role))
+    );
 
     return (
         <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
@@ -35,8 +52,8 @@ export default function MainLayout() {
                         <p className="text-xs text-slate-400 uppercase tracking-widest mt-1">Academia de Natación</p>
                     </div>
 
-                    <nav className="flex-1 px-4 py-6 space-y-2">
-                        {navItems.map((item) => (
+                    <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+                        {filteredNavItems.map((item) => (
                             <NavLink
                                 key={item.to}
                                 to={item.to}
@@ -54,6 +71,35 @@ export default function MainLayout() {
                                 <span className="font-medium">{item.label}</span>
                             </NavLink>
                         ))}
+
+                        {/* Admin Section */}
+                        {role === 'ADMIN' && (
+                            <>
+                                <div className="pt-4 pb-2 px-4">
+                                    <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
+                                        Configuración
+                                    </p>
+                                </div>
+                                {adminItems.map((item) => (
+                                    <NavLink
+                                        key={item.to}
+                                        to={item.to}
+                                        onClick={() => setIsSidebarOpen(false)}
+                                        className={({ isActive }) =>
+                                            cn(
+                                                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                                                isActive
+                                                    ? "bg-sky-600 text-white shadow-lg shadow-sky-900/20"
+                                                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                                            )
+                                        }
+                                    >
+                                        <item.icon className="w-5 h-5" />
+                                        <span className="font-medium">{item.label}</span>
+                                    </NavLink>
+                                ))}
+                            </>
+                        )}
                     </nav>
 
                     <div className="p-4 border-t border-slate-800">
@@ -81,12 +127,20 @@ export default function MainLayout() {
                 {/* Mobile Header */}
                 <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm">
                     <h1 className="text-lg font-bold text-slate-800">Los Parrales</h1>
-                    <button
-                        onClick={() => setIsSidebarOpen(true)}
-                        className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
-                    >
-                        <Menu className="w-6 h-6" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <SeasonSelector className="hidden sm:block" />
+                        <button
+                            onClick={() => setIsSidebarOpen(true)}
+                            className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                        >
+                            <Menu className="w-6 h-6" />
+                        </button>
+                    </div>
+                </header>
+
+                {/* Desktop Header with Season Selector */}
+                <header className="hidden lg:flex bg-white border-b border-slate-200 px-8 py-4 items-center justify-end shadow-sm">
+                    <SeasonSelector />
                 </header>
 
                 {/* Page Content */}

@@ -13,6 +13,7 @@ import {
     arrayUnion
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { loggingService } from './logging';
 import type { Student, Payment, PaymentMethod, Debt } from '../types/db';
 
 const STUDENTS_COLLECTION = 'students';
@@ -24,7 +25,7 @@ export const studentService = {
      * Transactional: Creates Student + Payment + Debt (if applicable)
      */
     async create(
-        studentData: Omit<Student, 'active' | 'remainingCredits' | 'hasDebt'>,
+        studentData: Omit<Student, 'active' | 'remainingCredits' | 'hasDebt' | 'createdAt'>,
         paymentData?: {
             amountPaid: number,
             totalCost: number,
@@ -103,10 +104,17 @@ export const studentService = {
                 ...studentData,
                 active: true,
                 remainingCredits: remainingCredits,
-                hasDebt: hasDebt
+                hasDebt: hasDebt,
+                createdAt: Date.now()
             };
             transaction.set(studentRef, newStudent);
         });
+
+        // Log Activity
+        await loggingService.addLog(
+            `Nuevo alumno registrado: ${studentData.fullName}`,
+            'SUCCESS'
+        );
 
         // Post-creation: Sync fixed schedule to existing daily slots
         if (studentData.fixedSchedule && studentData.fixedSchedule.length > 0) {
@@ -180,6 +188,14 @@ export const studentService = {
                 remainingCredits: currentCredits + credits
             });
         });
+
+        // We can't easily get the student name inside transaction return without reading, 
+        // but we can just use ID or Fetch.
+        // For optimization let's just log ID or simple message.
+        await loggingService.addLog(
+            `Alumno ${studentId} adquirió ${credits} clases (S/ ${amount})`,
+            'SUCCESS'
+        );
 
         return paymentRef.id;
     },
@@ -316,6 +332,11 @@ export const studentService = {
         if (studentId) {
             await this.updateDebtStatus(studentId);
         }
+
+        await loggingService.addLog(
+            `Alumno ${studentId} pagó deuda de S/ ${amount}`,
+            'SUCCESS'
+        );
     },
 
     async updateDebtStatus(studentId: string): Promise<void> {
@@ -329,5 +350,35 @@ export const studentService = {
 
         const ref = doc(db, STUDENTS_COLLECTION, studentId);
         await updateDoc(ref, { hasDebt });
+    },
+
+    /**
+     * Get count of active students
+     */
+    async getActiveStudentsCount(): Promise<number> {
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('active', '==', true)
+        );
+        // Using getCountFromServer if available would be cheaper, but for now:
+        const snap = await getDocs(q);
+        return snap.size;
+    },
+
+    /**
+     * Get count of new students for the current month
+     */
+    async getNewStudentsCount(month: number, year: number): Promise<number> {
+        const start = new Date(year, month, 1).getTime();
+        const end = new Date(year, month + 1, 0, 23, 59, 59).getTime();
+
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('createdAt', '>=', start),
+            where('createdAt', '<=', end)
+        );
+
+        const snap = await getDocs(q);
+        return snap.size;
     }
 };
