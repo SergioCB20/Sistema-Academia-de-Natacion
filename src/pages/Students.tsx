@@ -8,17 +8,21 @@ import {
     Phone,
     CreditCard,
     Plus,
-    // X,
     Calendar,
     ArrowRight,
     ArrowLeft,
     CheckCircle,
     DollarSign,
-    Printer
+    Printer,
+    Clock
 } from 'lucide-react';
 import { studentService } from '../services/students';
-import { DAYS, HOURS, SCHEDULE_RULES } from '../services/master';
-import type { Student, PaymentMethod, Debt, StudentCategory } from '../types/db';
+import { categoryService } from '../services/categoryService';
+
+
+import { seasonService } from '../services/seasonService';
+import { packageValidationService } from '../services/packageValidation';
+import type { Student, PaymentMethod, Debt, Category, Package, Season, DayType } from '../types/db';
 
 export default function Students() {
     const navigate = useNavigate();
@@ -26,10 +30,17 @@ export default function Students() {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
+    // Dynamic Data from DB
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [availablePackages, setAvailablePackages] = useState<Package[]>([]);
+    const [loadingPackages, setLoadingPackages] = useState(false);
+    const [activeSeason, setActiveSeason] = useState<Season | null>(null);
+
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-    const [step, setStep] = useState(1); // 1: Personal, 2: Schedule, 3: Payment
+    const [step, setStep] = useState(1); // 1: Personal, 2: Schedule, 3: Payment, 4: Confirmation
+    const [registeredStudentDni, setRegisteredStudentDni] = useState<string | null>(null);
 
     // DEBT Modal State
     const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
@@ -44,9 +55,14 @@ export default function Students() {
         email: '',
         birthDate: '',
         age: '',
-        category: 'Niños' as StudentCategory
+        categoryId: ''
     });
 
+    const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+    const [selectedSchedulePattern, setSelectedSchedulePattern] = useState<{
+        dayType: DayType;
+        timeSlot: string;
+    } | null>(null);
     const [fixedSchedule, setFixedSchedule] = useState<Array<{ dayId: string, timeId: string }>>([]);
 
     const [paymentData, setPaymentData] = useState({
@@ -58,13 +74,25 @@ export default function Students() {
 
     useEffect(() => {
         loadStudents();
+        loadCategories();
+        loadActiveSeason();
     }, []);
+
+    // Load packages when category changes and we're on step 2
+    useEffect(() => {
+        if (step === 2 && formData.categoryId && !editingStudent && activeSeason) {
+            loadAvailablePackagesForCategory(formData.categoryId);
+            // Clear previously selected package and schedule when category changes
+            setSelectedPackage(null);
+            setSelectedSchedulePattern(null);
+            setFixedSchedule([]);
+        }
+    }, [step, formData.categoryId, activeSeason]);
 
     const loadStudents = async () => {
         setLoading(true);
         try {
             const data = await studentService.getAllActive();
-            console.log(data)
             setStudents(data);
         } catch (error) {
             console.error("Error loading students:", error);
@@ -73,14 +101,51 @@ export default function Students() {
         }
     };
 
-    // ... (rest of the create/edit flow) ...
+    const loadCategories = async () => {
+        try {
+            const cats = await categoryService.getAll();
+            setCategories(cats.filter(c => c.isActive).sort((a, b) => a.order - b.order));
+        } catch (error) {
+            console.error("Error loading categories:", error);
+        }
+    };
+
+    const loadActiveSeason = async () => {
+        try {
+            const season = await seasonService.getActiveSeason();
+            setActiveSeason(season);
+        } catch (error) {
+            console.error("Error loading active season:", error);
+        }
+    };
+
+    const loadAvailablePackagesForCategory = async (categoryId: string) => {
+        if (!categoryId || !activeSeason) return;
+
+        setLoadingPackages(true);
+        try {
+            const packages = await packageValidationService.getAvailablePackages(
+                activeSeason.id,
+                categoryId
+            );
+            setAvailablePackages(packages);
+        } catch (error) {
+            console.error("Error loading packages:", error);
+        } finally {
+            setLoadingPackages(false);
+        }
+    };
+
+
 
     const handleCreateNew = () => {
         setEditingStudent(null);
-        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', category: '7 a 10' });
+        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', categoryId: '' });
         setFixedSchedule([]);
         setPaymentData({ amountPaid: '', totalCost: '0.00', credits: '12', method: 'CASH' });
         setStep(1);
+        setRegisteredStudentDni(null);
+
         setIsModalOpen(true);
     };
 
@@ -93,7 +158,7 @@ export default function Students() {
             email: student.email || '',
             birthDate: student.birthDate || '',
             age: student.age ? String(student.age) : '',
-            category: student.category || '7 a 10'
+            categoryId: student.categoryId || ''
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
@@ -111,14 +176,6 @@ export default function Students() {
         }
     };
 
-    const toggleSlot = (dayId: string, timeId: string) => {
-        const exists = fixedSchedule.find(s => s.dayId === dayId && s.timeId === timeId);
-        if (exists) {
-            setFixedSchedule(fixedSchedule.filter(s => !(s.dayId === dayId && s.timeId === timeId)));
-        } else {
-            setFixedSchedule([...fixedSchedule, { dayId, timeId }]);
-        }
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -132,6 +189,10 @@ export default function Students() {
             alert("El Teléfono debe tener 9 números exactos.");
             return;
         }
+        if (!formData.categoryId) {
+            alert("Debe seleccionar una edad para asignar la categoría.");
+            return;
+        }
 
         try {
             if (editingStudent) {
@@ -141,26 +202,52 @@ export default function Students() {
                     email: formData.email,
                     birthDate: formData.birthDate,
                     age: formData.age ? Number(formData.age) : undefined,
-                    category: formData.category,
+                    categoryId: formData.categoryId,
                     fixedSchedule: fixedSchedule
                 });
+                setIsModalOpen(false);
+                loadStudents();
             } else {
+                const newStudentDni = formData.dni || `TEMP_${Date.now()}`;
+
+                // Calculate package dates if package is selected
+                let packageStartDate: string | undefined;
+                let packageEndDate: string | undefined;
+
+                if (selectedPackage && selectedSchedulePattern) {
+                    const startDate = new Date();
+                    packageStartDate = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+                    const endDate = packageValidationService.calculatePackageEndDate(
+                        startDate,
+                        selectedPackage,
+                        selectedSchedulePattern.dayType
+                    );
+                    packageEndDate = endDate.toISOString().split('T')[0]; // YYYY-MM-DD
+                }
+
                 await studentService.create({
-                    id: formData.dni || `TEMP_${Date.now()}`, // Fallback ID if optional but DNI is usually the ID. User might need to clarify if DNI is ID. Assuming optional DNI might strictly mean 'not known yet' but ID is needed. For now treating input validation.
+                    id: newStudentDni,
                     ...formData,
                     birthDate: formData.birthDate,
                     age: formData.age ? Number(formData.age) : undefined,
-                    category: formData.category,
-                    fixedSchedule: fixedSchedule
+                    categoryId: formData.categoryId,
+                    fixedSchedule: fixedSchedule,
+                    currentPackageId: selectedPackage?.id,
+                    packageStartDate,
+                    packageEndDate
                 }, {
                     amountPaid: Number(paymentData.amountPaid) || 0,
                     totalCost: Number(paymentData.totalCost) || 0,
                     credits: Number(paymentData.credits) || 0,
                     method: paymentData.method
                 });
+
+                // Go to step 4 (confirmation) instead of closing
+                setRegisteredStudentDni(newStudentDni);
+                setStep(4);
+                loadStudents();
             }
-            setIsModalOpen(false);
-            loadStudents();
         } catch (error: any) {
             console.error("Error saving student:", error);
             alert(error.message || "Error al guardar");
@@ -182,7 +269,7 @@ export default function Students() {
     };
 
     const handlePayDebt = async (debt: Debt) => {
-        const amount = prompt(`Monto a pagar para esta deuda(Saldo: S / ${debt.balance.toFixed(2)})`, debt.balance.toString());
+        const amount = prompt(`Monto a pagar para esta deuda (Saldo: S/ ${debt.balance.toFixed(2)})`, debt.balance.toString());
         if (!amount) return;
 
         const payAmount = Number(amount);
@@ -192,40 +279,81 @@ export default function Students() {
         }
 
         try {
-            await studentService.payDebt(debt.id, payAmount, 'CASH'); // Default CASH for now
+            await studentService.payDebt(debt.id, payAmount, 'CASH');
             alert("Deuda actualizada");
 
-            // Refresh
             const updatedDebts = await studentService.getDebts(studentForDebt!.dni);
             setSelectedDebts(updatedDebts);
 
-            // If cleared, reload students
             if (updatedDebts.length === 0) {
                 loadStudents();
                 setIsDebtModalOpen(false);
-            } else {
-                // If specific debt paid but others remain
-                // loadStudents(); // to update the red line if partial? No only if full clear.
-                // We keep modal open.
             }
         } catch (e: any) {
             alert(e.message);
         }
     };
 
+    // Get category from DB by ID
+    const getCategoryById = (id: string): Category | undefined => {
+        return categories.find(c => c.id === id);
+    };
 
-    const getCategoryLabel = (cat: StudentCategory) => cat;
+    // Auto-calculate category from age using DB categories
+    const getCategoryIdFromAge = (age: number): string => {
+        const category = categories.find(c => age >= c.ageRange.min && age <= c.ageRange.max);
+        return category?.id || '';
+    };
 
-    const getCategoryColor = (cat: StudentCategory) => {
-        switch (cat) {
-            case 'Aquabebe': return 'bg-pink-100 text-pink-700';
-            case '4 a 6': return 'bg-yellow-100 text-yellow-700';
-            case '7 a 10': return 'bg-orange-100 text-orange-700';
-            case '11 a 15': return 'bg-purple-100 text-purple-700';
-            case '16 a más': return 'bg-teal-100 text-teal-700';
-            case 'Adultos': return 'bg-blue-100 text-blue-700';
-            default: return 'bg-slate-100 text-slate-500';
+    // Handle age change and auto-update category
+    const handleAgeChange = (ageValue: string) => {
+        const age = parseInt(ageValue);
+        const newCategoryId = !isNaN(age) && age >= 1 ? getCategoryIdFromAge(age) : '';
+        setFormData({ ...formData, age: ageValue, categoryId: newCategoryId });
+    };
+
+    const handleNextStep = () => {
+        if (step === 1) {
+            // Validate Step 1
+            if (!formData.fullName.trim()) {
+                alert("El nombre es requerido.");
+                return;
+            }
+            if (formData.dni && !/^\d{8}$/.test(formData.dni)) {
+                alert("El DNI debe tener 8 números exactos.");
+                return;
+            }
+            if (formData.phone && !/^\d{9}$/.test(formData.phone)) {
+                alert("El Teléfono debe tener 9 números exactos.");
+                return;
+            }
+            if (!formData.categoryId) {
+                alert("Debe ingresar una edad para asignar la categoría.");
+                return;
+            }
         }
+
+        if (step === 2 && !editingStudent) {
+            if (activeSeason && !selectedPackage && fixedSchedule.length === 0) {
+                if (!confirm("No has seleccionado ningún paquete. ¿Deseas continuar sin matrícula?")) {
+                    return;
+                }
+            } else if (selectedPackage && fixedSchedule.length === 0) {
+                if (!confirm("Has seleccionado un paquete pero no has elegido el patrón de horario. ¿Deseas continuar sin definir el horario?")) {
+                    return;
+                }
+            } else if (!selectedPackage && fixedSchedule.length === 0) {
+                if (!confirm("No has seleccionado ningún horario. ¿Deseas continuar sin horario fijo?")) {
+                    return;
+                }
+            }
+        }
+
+        setStep(step + 1);
+    };
+
+    const handlePrevStep = () => {
+        setStep(step - 1);
     };
 
     const filteredStudents = students.filter(s =>
@@ -235,46 +363,7 @@ export default function Students() {
 
     const debtAmount = Number(paymentData.totalCost) - Number(paymentData.amountPaid);
 
-    // Auto-calculate category from age
-    const getCategoryFromAge = (age: number): StudentCategory => {
-        if (age >= 18) return 'Adultos';
-        if (age >= 16) return '16 a más';
-        if (age >= 11) return '11 a 15';
-        if (age >= 7) return '7 a 10';
-        if (age >= 4) return '4 a 6';
-        if (age >= 1) return 'Aquabebe';
-        return '7 a 10'; // Default
-    };
-
-    // Handle age change and auto-update category
-    const handleAgeChange = (ageValue: string) => {
-        const age = parseInt(ageValue);
-        const newCategory = !isNaN(age) && age >= 1 ? getCategoryFromAge(age) : '7 a 10';
-        setFormData({ ...formData, age: ageValue, category: newCategory });
-    };
-
-    const handleNextStep = () => {
-        if (step === 1) {
-            // Validate Step 1
-            if (formData.dni && !/^\d{8}$/.test(formData.dni)) {
-                alert("El DNI debe tener 8 números exactos.");
-                return;
-            }
-            if (formData.phone && !/^\d{9}$/.test(formData.phone)) {
-                alert("El Teléfono debe tener 9 números exactos.");
-                return;
-            }
-        }
-        setStep(step + 1);
-    };
-
-    const handlePrevStep = () => {
-        if (step === 2) {
-            // Clear selected schedules when going back from step 2
-            setFixedSchedule([]);
-        }
-        setStep(step - 1);
-    };
+    const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
 
     return (
         <div className="space-y-6">
@@ -308,72 +397,81 @@ export default function Students() {
                         <p>No se encontraron alumnos</p>
                     </div>
                 ) : (
-                    filteredStudents.map(student => (
-                        <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
-                            {student.hasDebt && (
-                                <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
-                            )}
+                    filteredStudents.map(student => {
+                        const studentCategory = student.categoryId ? getCategoryById(student.categoryId) : null;
 
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors">
-                                    <User className="w-6 h-6" />
-                                </div>
-                                <div className="flex gap-2">
-                                    {student.hasDebt && (
-                                        <button
-                                            onClick={() => handleOpenDebt(student)}
-                                            className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200 transition-colors flex items-center gap-1"
-                                            title="Pagar Deuda"
-                                        >
-                                            <DollarSign className="w-3 h-3" /> Pagar
-                                        </button>
-                                    )}
-                                    <button onClick={() => handleEdit(student)} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
-                                    <button onClick={() => handleDelete(student.dni)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
-                                {student.fullName}
-                                {student.category && (
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider ${getCategoryColor(student.category)}`}>
-                                        {getCategoryLabel(student.category)}
-                                    </span>
+                        return (
+                            <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
+                                {student.hasDebt && (
+                                    <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
                                 )}
-                            </h3>
-                            <p className="text-sm text-slate-400 font-mono mb-4">DNI: {student.dni}</p>
 
-                            <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
-                                <Phone className="w-4 h-4" />
-                                <span>{student.phone}</span>
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors">
+                                        <User className="w-6 h-6" />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {student.hasDebt && (
+                                            <button
+                                                onClick={() => handleOpenDebt(student)}
+                                                className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200 transition-colors flex items-center gap-1"
+                                                title="Pagar Deuda"
+                                            >
+                                                <DollarSign className="w-3 h-3" /> Pagar
+                                            </button>
+                                        )}
+                                        <button onClick={() => handleEdit(student)} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
+                                            <Pencil className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => handleDelete(student.dni)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
+                                    {student.fullName}
+                                    {studentCategory && (
+                                        <span
+                                            className="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider"
+                                            style={{
+                                                backgroundColor: studentCategory.color ? `${studentCategory.color}20` : '#f1f5f9',
+                                                color: studentCategory.color || '#64748b'
+                                            }}
+                                        >
+                                            {studentCategory.name}
+                                        </span>
+                                    )}
+                                </h3>
+                                <p className="text-sm text-slate-400 font-mono mb-4">DNI: {student.dni}</p>
+
+                                <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
+                                    <Phone className="w-4 h-4" />
+                                    <span>{student.phone}</span>
+                                </div>
+
+                                <div className="flex justify-between items-center pt-4 border-t border-slate-50">
+                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${student.remainingCredits > 0
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                        {student.remainingCredits} Clases
+                                    </span>
+
+                                    <button className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                        <CreditCard className="w-4 h-4" />
+                                        Recargar
+                                    </button>
+                                </div>
                             </div>
-
-                            <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${student.remainingCredits > 0
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : 'bg-slate-100 text-slate-500'
-                                    }`}>
-                                    {student.remainingCredits} Clases
-                                </span>
-
-                                <button className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                                    <CreditCard className="w-4 h-4" />
-                                    Recargar
-                                </button>
-                            </div>
-                        </div>
-                    ))
+                        );
+                    })
                 )}
             </div>
 
             {/* WIZARD MODAL (Create/Edit) */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    {/* ... (Existing Modal Code) ... */}
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
                         {/* Header */}
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
@@ -381,7 +479,7 @@ export default function Students() {
                                 <h3 className="text-xl font-bold text-slate-800">
                                     {editingStudent ? 'Editar Alumno' : 'Nuevo Registro'}
                                 </h3>
-                                <p className="text-sm text-slate-500">Paso {step} de 3</p>
+                                <p className="text-sm text-slate-500">Paso {step} de {editingStudent ? 3 : 4}</p>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
                         </div>
@@ -391,6 +489,9 @@ export default function Students() {
                             <div className={`h-1 flex-1 rounded-full ${step >= 1 ? 'bg-sky-600' : 'bg-slate-200'}`} />
                             <div className={`h-1 flex-1 rounded-full ${step >= 2 ? 'bg-sky-600' : 'bg-slate-200'}`} />
                             <div className={`h-1 flex-1 rounded-full ${step >= 3 ? 'bg-sky-600' : 'bg-slate-200'}`} />
+                            {!editingStudent && (
+                                <div className={`h-1 flex-1 rounded-full ${step >= 4 ? 'bg-sky-600' : 'bg-slate-200'}`} />
+                            )}
                         </div>
 
                         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
@@ -400,17 +501,22 @@ export default function Students() {
                                 <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Datos Personales</h4>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo</label>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo *</label>
                                         <input required type="text" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                                             value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })}
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Edad</label>
-                                        <input type="number" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Edad *</label>
+                                        <input required type="number" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                                             value={formData.age} onChange={e => handleAgeChange(e.target.value)}
                                             placeholder="Ej. 6"
+                                            min="1"
+                                            max="100"
                                         />
+                                        {formData.age && !formData.categoryId && (
+                                            <p className="text-xs text-red-500 mt-1">No hay categoría disponible para esta edad</p>
+                                        )}
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
@@ -435,7 +541,7 @@ export default function Students() {
                                                 type="text"
                                                 disabled
                                                 className="w-full px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
-                                                value={formData.category}
+                                                value={currentCategory?.name || 'Ingrese edad'}
                                             />
                                         </div>
                                         <div>
@@ -451,93 +557,152 @@ export default function Students() {
                             {/* STEP 2: SCHEDULE */}
                             {step === 2 && (
                                 <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Horario Fijo (Matrícula)</h4>
-                                    <p className="text-xs text-slate-500 mb-4">Selecciona los días y horas que el alumno asistirá regularmente.</p>
+                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Selección de Paquete</h4>
+                                    <p className="text-xs text-slate-500 mb-4">
+                                        Selecciona un paquete disponible para <span className="font-bold">{currentCategory?.name}</span>
+                                    </p>
 
-                                    <div className="grid grid-cols-[auto_repeat(7,1fr)] gap-1 text-xs overflow-x-auto pb-4">
-                                        <div className="p-2 font-bold text-slate-400"></div>
-                                        {DAYS.map(d => (
-                                            <div key={d.id} className="p-2 text-center font-bold text-slate-600 bg-slate-50 rounded">{d.id}</div>
-                                        ))}
-
-                                        {HOURS.map(h => {
-                                            const ageNum = parseInt(formData.age);
-
-                                            return (
-                                                <div key={h.id} className="contents">
-                                                    <div className="p-2 font-mono text-slate-400 whitespace-nowrap flex flex-col justify-center items-end pr-4 h-[60px]">
-                                                        <span className="text-xs">{h.label.split(' - ')[0]}</span>
-                                                    </div>
-                                                    {DAYS.map(d => {
-                                                        const isSelected = fixedSchedule.some(s => s.dayId === d.id && s.timeId === h.id);
-
-                                                        // Find the specific rule for this day/time combination
-                                                        const rule = SCHEDULE_RULES.find(r => r.timeId === h.id && r.dayIds.includes(d.id));
-                                                        const allowedAges = rule?.allowedAges || [];
-                                                        const capacity = rule?.capacity ?? 0;
-
-                                                        // Check if there's no rule for this slot (e.g., weekends after 17:30)
-                                                        const hasNoRule = !rule;
-
-                                                        // Check if age is restricted for this specific slot
-                                                        const isAgeRestricted = !isNaN(ageNum) && allowedAges.length > 0 && !allowedAges.includes(ageNum);
-                                                        const isBreakSlot = capacity === 0;
-
-                                                        // Calculate LIVE capacity
-                                                        const currentCount = students.filter(s =>
-                                                            s.active &&
-                                                            s.fixedSchedule?.some(fs => fs.dayId === d.id && fs.timeId === h.id)
-                                                        ).length;
-
-                                                        const isFull = currentCount >= capacity;
-                                                        const isDisabled = hasNoRule || isBreakSlot || isAgeRestricted || (isFull && !isSelected);
-
-                                                        // Get age range label
-                                                        const getAgeLabel = () => {
-                                                            if (hasNoRule || isBreakSlot) return '';
-                                                            if (allowedAges.length === 0) return '';
-                                                            const minAge = Math.min(...allowedAges);
-                                                            const maxAge = Math.max(...allowedAges);
-                                                            if (minAge <= 3) return 'Aquabebe';
-                                                            if (maxAge >= 16) return '16+';
-                                                            return `${minAge}-${maxAge}`;
-                                                        };
-
-                                                        return (
-                                                            <button
-                                                                key={`${d.id}_${h.id}`}
-                                                                type="button"
-                                                                disabled={isDisabled}
-                                                                onClick={() => toggleSlot(d.id, h.id)}
-                                                                className={`
-                                                                    h-[55px] p-1 rounded border transition-all flex flex-col items-center justify-center gap-0.5 relative overflow-hidden
-                                                                    ${isSelected
-                                                                        ? 'bg-sky-600 text-white border-sky-600 shadow-md transform scale-105 z-10'
-                                                                        : isDisabled
-                                                                            ? 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed opacity-60'
-                                                                            : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:border-emerald-300 hover:shadow-sm'
-                                                                    }
-                                                                `}
-                                                            >
-                                                                {isSelected && <CheckCircle className="w-3 h-3" />}
-                                                                {!isSelected && !isDisabled && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
-
-                                                                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-sky-100' : isDisabled ? 'text-slate-300' : 'text-emerald-600/70'}`}>
-                                                                    {hasNoRule ? '-' : `${currentCount}/${capacity}`}
-                                                                </span>
-                                                                {!hasNoRule && !isBreakSlot && (
-                                                                    <span className={`text-[8px] font-medium ${isSelected ? 'text-sky-200' : isDisabled ? 'text-slate-300' : 'text-emerald-500/60'}`}>
-                                                                        {getAgeLabel()}
+                                    {loadingPackages ? (
+                                        <div className="text-center py-12">
+                                            <Clock className="w-8 h-8 animate-spin mx-auto text-slate-400 mb-2" />
+                                            <p className="text-slate-500">Cargando paquetes disponibles...</p>
+                                        </div>
+                                    ) : availablePackages.length === 0 ? (
+                                        <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                            <p className="text-slate-500">No hay paquetes disponibles para esta categoría.</p>
+                                            <p className="text-xs text-slate-400 mt-2">Crea paquetes desde "Paquetes"</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-6">
+                                            {/* Package Selection */}
+                                            {!selectedPackage ? (
+                                                <div className="space-y-3">
+                                                    <p className="text-xs font-bold text-slate-600 mb-2">PASO 1: Elige un paquete</p>
+                                                    {availablePackages.map((pkg) => (
+                                                        <button
+                                                            key={pkg.id}
+                                                            type="button"
+                                                            onClick={() => setSelectedPackage(pkg)}
+                                                            className="w-full p-4 rounded-xl border-2 border-slate-200 hover:border-sky-300 hover:shadow-sm transition-all text-left bg-white"
+                                                        >
+                                                            <div className="flex items-start justify-between mb-2">
+                                                                <div>
+                                                                    <h6 className="font-bold text-slate-800 mb-1">{pkg.name}</h6>
+                                                                    <p className="text-xs text-slate-500">
+                                                                        {pkg.classesPerMonth} clases/mes × {pkg.duration} {pkg.duration === 1 ? 'mes' : 'meses'}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <p className="text-lg font-bold text-sky-600">S/ {pkg.price}</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex gap-2 flex-wrap mt-2">
+                                                                {(Array.isArray(pkg.scheduleTypes) ? pkg.scheduleTypes : []).map((dayType) => (
+                                                                    <span key={dayType} className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                                                                        {dayType === 'lun-mier-vier' ? 'Lun-Mié-Vie' : dayType === 'mar-juev' ? 'Mar-Jue' : 'Sáb-Dom'}
                                                                     </span>
-                                                                )}
-                                                            </button>
-                                                        );
-                                                    })}
+                                                                ))}
+                                                            </div>
+                                                        </button>
+                                                    ))}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <p className="text-sm text-right text-slate-500 font-bold">{fixedSchedule.length} Clases / semana</p>
+                                            ) : (
+                                                <div className="space-y-4">
+                                                    {/* Selected Package Summary */}
+                                                    <div className="bg-sky-50 p-4 rounded-xl border border-sky-200">
+                                                        <div className="flex items-start justify-between">
+                                                            <div>
+                                                                <p className="text-xs text-sky-600 font-bold mb-1">PAQUETE SELECCIONADO</p>
+                                                                <h6 className="font-bold text-slate-800">{selectedPackage.name}</h6>
+                                                                <p className="text-xs text-slate-600 mt-1">
+                                                                    {selectedPackage.classesPerMonth} clases/mes × {selectedPackage.duration} {selectedPackage.duration === 1 ? 'mes' : 'meses'} = {selectedPackage.classesPerMonth * selectedPackage.duration} clases totales
+                                                                </p>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setSelectedPackage(null);
+                                                                    setSelectedSchedulePattern(null);
+                                                                    setFixedSchedule([]);
+                                                                }}
+                                                                className="text-xs text-sky-600 hover:text-sky-700 font-bold"
+                                                            >
+                                                                Cambiar
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Schedule Pattern Selection */}
+                                                    <div>
+                                                        <p className="text-xs font-bold text-slate-600 mb-2">PASO 2: Elige el patrón de horario</p>
+                                                        <div className="space-y-2">
+                                                            {(Array.isArray(selectedPackage.scheduleTypes) ? selectedPackage.scheduleTypes : []).map((dayType) => {
+                                                                const canComplete = activeSeason && packageValidationService.canCompleteBeforeSeasonEnd(
+                                                                    selectedPackage,
+                                                                    dayType,
+                                                                    activeSeason.endDate
+                                                                );
+                                                                const isSelected = selectedSchedulePattern?.dayType === dayType;
+
+                                                                // Calculate actual classes if cannot complete
+                                                                const actualClasses = !canComplete && activeSeason
+                                                                    ? packageValidationService.calculateActualClasses(new Date(), activeSeason.endDate, dayType)
+                                                                    : 0;
+
+                                                                return (
+                                                                    <button
+                                                                        key={dayType}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            // Allow selection even if time is insufficient, just warn visibly (UI already shows warning)
+                                                                            setSelectedSchedulePattern({ dayType, timeSlot: '' });
+                                                                            setFixedSchedule([{ dayId: dayType, timeId: '' }]);
+                                                                        }}
+                                                                        className={`w-full p-3 rounded-lg border-2 transition-all text-left ${isSelected
+                                                                            ? 'bg-sky-600 text-white border-sky-600 shadow-md'
+                                                                            : !canComplete
+                                                                                ? 'bg-amber-50 border-amber-200 hover:border-amber-300'
+                                                                                : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-sm'
+                                                                            }`}
+                                                                    >
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div>
+                                                                                <p className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+                                                                                    {dayType === 'lun-mier-vier' ? 'Lunes, Miércoles, Viernes' :
+                                                                                        dayType === 'mar-juev' ? 'Martes, Jueves' :
+                                                                                            'Sábado, Domingo'}
+                                                                                </p>
+                                                                                <p className={`text-xs ${isSelected ? 'text-sky-100' : 'text-slate-500'}`}>
+                                                                                    {packageValidationService.getClassesPerWeek(dayType)} clases por semana
+                                                                                </p>
+                                                                                {!canComplete && (
+                                                                                    <div className={`text-xs mt-1 font-bold ${isSelected ? 'text-red-200' : 'text-amber-600'}`}>
+                                                                                        <p>⚠️ La temporada termina antes de completar el paquete</p>
+                                                                                        <p className="mt-0.5 opacity-90">
+                                                                                            Solo se podrán dar {actualClasses} clases (El precio se mantiene)
+                                                                                        </p>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            {isSelected && <CheckCircle className="w-5 h-5" />}
+                                                                        </div>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <p className="text-sm text-right text-slate-500 font-bold mt-4">
+                                        {!selectedPackage
+                                            ? 'Selecciona un paquete para continuar'
+                                            : !selectedSchedulePattern
+                                                ? '⚠️ Debes seleccionar un patrón de horario'
+                                                : '✓ Paquete y horario seleccionados'}
+                                    </p>
                                 </div>
                             )}
 
@@ -607,61 +772,75 @@ export default function Students() {
                                     )}
                                 </div>
                             )}
+
+                            {/* STEP 4: CONFIRMATION (Only for new students) */}
+                            {step === 4 && !editingStudent && (
+                                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 text-center py-8">
+                                    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                                        <CheckCircle className="w-12 h-12 text-emerald-600" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-2xl font-bold text-slate-800 mb-2">¡Alumno Registrado!</h4>
+                                        <p className="text-slate-600">El alumno ha sido registrado exitosamente en el sistema.</p>
+                                    </div>
+
+                                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-6">
+                                        <Printer className="w-8 h-8 text-sky-600 mx-auto mb-3" />
+                                        <h5 className="font-bold text-slate-800 mb-2">¿Desea imprimir el carnet ahora?</h5>
+                                        <p className="text-sm text-slate-600 mb-4">Puede imprimir el carnet del alumno para entregárselo</p>
+
+                                        <div className="flex gap-3 justify-center">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsModalOpen(false);
+                                                }}
+                                                className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg font-bold hover:bg-slate-50 transition-colors"
+                                            >
+                                                Ahora No
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsModalOpen(false);
+                                                    if (registeredStudentDni) {
+                                                        navigate(`/carnet?dni=${registeredStudentDni}`);
+                                                    }
+                                                }}
+                                                className="px-6 py-2 bg-sky-600 text-white rounded-lg font-bold hover:bg-sky-700 transition-colors flex items-center gap-2 shadow-lg shadow-sky-600/20"
+                                            >
+                                                <Printer className="w-4 h-4" />
+                                                Imprimir Carnet
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </form>
 
                         {/* Footer / Navigation */}
-                        <div className="p-4 border-t border-slate-100 flex justify-between bg-slate-50/50">
-                            {step > 1 ? (
-                                <button type="button" onClick={handlePrevStep} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium flex items-center gap-2">
-                                    <ArrowLeft className="w-4 h-4" /> Anterior
-                                </button>
-                            ) : (
-                                <div /> /* Spacer */
-                            )}
-
-                            {step < 3 ? (
-                                <button type="button" onClick={handleNextStep} className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 flex items-center gap-2">
-                                    Siguiente <ArrowRight className="w-4 h-4" />
-                                </button>
-                            ) : (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => {
-                                            handleSubmit({ preventDefault: () => { } } as any).then(() => {
-                                                // Assuming handleSubmit handles validation/success.
-                                                // Ideally handleSubmit should return success status.
-                                                // For now, checking if modal closed implies success, but here we are inline.
-                                                // Let's refactor handleSubmit slightly or trust happy path for this MVP action.
-                                                // Actually handleSubmit closes modal. We need to intercept.
-                                                // But since handleSubmit is async and void, we can't easily chain.
-                                                // Let's just create a specialized wrapper function.
-                                            });
-                                        }}
-                                        type="button"
-                                        className="px-6 py-2 border border-slate-200 text-slate-600 rounded-lg font-bold hover:bg-slate-50 flex items-center gap-2"
-                                        onClickCapture={async (e) => {
-                                            e.stopPropagation();
-                                            // Quick hack: call submit manually, if success, navigate.
-                                            // To ensure we have access to the created user, DNI is key.
-                                            await handleSubmit(e as any);
-                                            // If modal closed (we can check state? No, it updates async).
-                                            // We'll assume success if no error alert thrown (handleSubmit has alerts).
-                                            // Navigation happens:
-                                            if (formData.dni) {
-                                                setTimeout(() => navigate(`/carnet?dni=${formData.dni}`), 500);
-                                            }
-                                        }}
-                                    >
-                                        <Printer className="w-4 h-4" />
-                                        Guardar e Imprimir
+                        {step < 4 && (
+                            <div className="p-4 border-t border-slate-100 flex justify-between bg-slate-50/50">
+                                {step > 1 ? (
+                                    <button type="button" onClick={handlePrevStep} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium flex items-center gap-2">
+                                        <ArrowLeft className="w-4 h-4" /> Anterior
                                     </button>
+                                ) : (
+                                    <div /> /* Spacer */
+                                )}
+
+                                {step < 3 ? (
+                                    <button type="button" onClick={handleNextStep} className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 flex items-center gap-2">
+                                        Siguiente <ArrowRight className="w-4 h-4" />
+                                    </button>
+                                ) : (
                                     <button onClick={handleSubmit} type="button" className="px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-2 shadow-lg shadow-emerald-600/20">
                                         <CheckCircle className="w-4 h-4" />
                                         {editingStudent ? 'Actualizar Alumno' : 'Finalizar Registro'}
                                     </button>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

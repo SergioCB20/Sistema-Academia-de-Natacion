@@ -33,7 +33,8 @@ export const studentService = {
             method: PaymentMethod
         }
     ): Promise<void> {
-        const studentRef = doc(db, STUDENTS_COLLECTION, studentData.dni);
+        // Use id field for document reference (handles empty DNI case)
+        const studentRef = doc(db, STUDENTS_COLLECTION, studentData.id);
         const paymentRef = doc(collection(db, PAYMENTS_COLLECTION));
         const debtRef = doc(collection(db, 'debts'));
 
@@ -48,7 +49,7 @@ export const studentService = {
             // Ideally we use count() aggregation, but inside a transaction we need to read to lock?
             // Count queries are not yet supported directly inside Node SDK transactions in all versions, 
             // but standard query get is. For efficiency in high scale, we might need a counter doc.
-            // For now (< 100 students), reading the query size is OK.
+            // For now (<100 students), reading the query size is OK.
 
             // Check each requested slot
             // 1.5 Validate Capacity for Fixed Schedule
@@ -73,7 +74,7 @@ export const studentService = {
                 // Create Payment Log
                 const newPayment: Payment = {
                     id: paymentRef.id,
-                    studentId: studentData.dni,
+                    studentId: studentData.id, // Use id instead of dni
                     amount: amountPaid,
                     credits: credits,
                     method: method,
@@ -87,7 +88,7 @@ export const studentService = {
                 if (isPartial) {
                     const newDebt: Debt = {
                         id: debtRef.id,
-                        studentId: studentData.dni,
+                        studentId: studentData.id, // Use id instead of dni
                         slotId: 'MATRICULA_INICIAL',
                         amountTotal: totalCost,
                         amountPaid: amountPaid,
@@ -100,8 +101,12 @@ export const studentService = {
             }
 
             // 3. Create Student
+            // If DNI is empty, populate it with the id
+            const finalDni = studentData.dni || studentData.id;
+
             const newStudent: Student = {
                 ...studentData,
+                dni: finalDni, // Ensure dni is populated
                 active: true,
                 remainingCredits: remainingCredits,
                 hasDebt: hasDebt,
@@ -121,7 +126,7 @@ export const studentService = {
             // We don't await this to keep UI responsive? Or we do?
             // Better to await to ensure consistency before UI reload.
             try {
-                await this.syncFixedScheduleToSlots(studentData.dni, studentData.fixedSchedule);
+                await this.syncFixedScheduleToSlots(studentData.id, studentData.fixedSchedule);
             } catch (e) {
                 console.error("Error syncing slots:", e);
                 // Non-fatal error
@@ -231,7 +236,9 @@ export const studentService = {
      * It looks ahead 4 weeks.
      */
     async syncFixedScheduleToSlots(studentId: string, fixedSchedule: Array<{ dayId: string, timeId: string }>): Promise<void> {
-        // Look ahead 28 days
+        // Note: fixedSchedule now stores dayType patterns (e.g., "lun-mier-vier") in dayId field
+        // and timeSlot (e.g., "13:00-14:00") in timeId field
+
         const batch = writeBatch(db);
         let operations = 0;
         const today = new Date();
@@ -246,29 +253,25 @@ export const studentService = {
 
         const snapshot = await getDocs(q);
 
-        // Map of DayID -> TimeIDs that the student has
-        const scheduleMap: Record<string, string[]> = {};
-        fixedSchedule.forEach(s => {
-            if (!scheduleMap[s.dayId]) scheduleMap[s.dayId] = [];
-            scheduleMap[s.dayId].push(s.timeId);
-        });
-
-        const mapDay = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+        // Create a set of schedule patterns for quick lookup
+        // Each entry is "dayType_timeSlot" (e.g., "lun-mier-vier_13:00-14:00")
+        const scheduleSet = new Set(
+            fixedSchedule.map(s => `${s.dayId}_${s.timeId}`)
+        );
 
         snapshot.docs.forEach(docSnap => {
             const data = docSnap.data();
-            // const dateParts = data.date.split('-'); // Not needed if parsing directly
-            // const d = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]));
-            // Use UTC day from ISO string components or construct accurately
-            const d = new Date(data.date); // This parses as UTC 00:00 usually if ISO YYYY-MM-DD
-            // However, getUTCDay() is safer.
-            const dayId = mapDay[d.getUTCDay()];
 
-            if (scheduleMap[dayId] && scheduleMap[dayId].includes(data.timeId)) {
-                batch.update(docSnap.ref, {
-                    attendeeIds: arrayUnion(studentId)
-                });
-                operations++;
+            // Match by dayType and timeSlot
+            if (data.dayType && data.timeSlot) {
+                const slotKey = `${data.dayType}_${data.timeSlot}`;
+
+                if (scheduleSet.has(slotKey)) {
+                    batch.update(docSnap.ref, {
+                        attendeeIds: arrayUnion(studentId)
+                    });
+                    operations++;
+                }
             }
         });
 

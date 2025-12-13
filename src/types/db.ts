@@ -105,6 +105,7 @@ export interface DailySlot {
     id: string; // "2025-01-20_10-11"
     date: string | Date; // "2025-01-20" or Date object
     timeId: string; // "10-11"
+    dayType?: DayType; // "lun-mier-vier", "mar-juev", "sab-dom" (from schedule template)
     scheduleTemplateId?: string; // Reference to ScheduleTemplate (new system)
     seasonId?: string; // Reference to Season (new system)
     categoryId?: string; // Reference to Category (new system)
@@ -127,21 +128,23 @@ export interface PackageHistory {
 }
 
 export interface Student {
-    id: string; // DNI
+    id: string; // DNI or generated ID
     fullName: string;
-    dni: string;
-    phone: string;
+    dni: string; // Can be empty string if not provided
+    phone: string; // Can be empty string if not provided
     active: boolean;
     remainingCredits: number;
     hasDebt: boolean;
     fixedSchedule: Array<{ dayId: string; timeId: string }>; // Array of slots ID: "LUN_07-08" or object
-    category: StudentCategory; // Legacy field
-    categoryId?: string; // Reference to Category (new system)
+    category?: StudentCategory; // Legacy field (optional for migration)
+    categoryId: string; // Reference to Category (new system - required)
     currentPackageId?: string; // Reference to current Package
+    packageStartDate?: string; // YYYY-MM-DD - when package started
+    packageEndDate?: string; // YYYY-MM-DD - when package ends
     packageHistory?: PackageHistory[]; // History of packages
     email?: string; // Optional context
     createdAt: number; // Timestamp
-    birthDate: string; // YYYY-MM-DD
+    birthDate?: string; // YYYY-MM-DD (optional)
     age?: number; // Manual age override
 }
 
