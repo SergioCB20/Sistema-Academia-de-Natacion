@@ -199,7 +199,7 @@ export default function Packages() {
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <span className="text-xs text-gray-500">Horarios:</span>
-                                    {pkg.scheduleTypes.map(type => (
+                                    {Array.isArray(pkg.scheduleTypes) && pkg.scheduleTypes.map(type => (
                                         <span key={type} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
                                             {type}
                                         </span>
@@ -207,12 +207,12 @@ export default function Packages() {
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                     <span className="text-xs text-gray-500">Categorías:</span>
-                                    {pkg.applicableCategories.includes('all') ? (
+                                    {Array.isArray(pkg.applicableCategories) && pkg.applicableCategories.includes('all') ? (
                                         <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
                                             Todas
                                         </span>
                                     ) : (
-                                        pkg.applicableCategories.map(catId => {
+                                        Array.isArray(pkg.applicableCategories) && pkg.applicableCategories.map(catId => {
                                             const cat = categories.find(c => c.id === catId);
                                             return cat ? (
                                                 <span key={catId} className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">

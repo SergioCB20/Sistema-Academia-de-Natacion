@@ -167,13 +167,13 @@ export default function ScheduleTemplates() {
         if (!currentSeason) return;
 
         try {
-            const count = await scheduleTemplateService.generateDailySlots(
+            await scheduleTemplateService.generateDailySlots(
                 currentSeason.id,
                 generateData.startDate,
                 generateData.endDate
             );
 
-            alert(`Se generaron ${count} slots diarios exitosamente`);
+            alert(`Se generaró el nuevo horario exitosamente`);
             setShowGenerateModal(false);
         } catch (error) {
             console.error('Error generating slots:', error);
@@ -440,7 +440,7 @@ export default function ScheduleTemplates() {
                             <div className="space-y-4">
                                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                                     <p className="text-sm text-blue-800">
-                                        Se generarán slots diarios basados en las plantillas existentes para el rango de fechas seleccionado.
+                                        Se generarán el nuevo horario basados en la plantilla existente para el rango de fechas seleccionado.
                                     </p>
                                 </div>
 

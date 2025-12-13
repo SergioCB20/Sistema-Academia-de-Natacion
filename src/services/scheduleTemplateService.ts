@@ -277,6 +277,7 @@ export const scheduleTemplateService = {
                 batch.set(slotRef, {
                     id: slotId,
                     date: dateStr,
+                    dayType: template.dayType, // Add dayType from template
                     scheduleTemplateId: template.id,
                     seasonId: seasonId,
                     categoryId: template.categoryId,
