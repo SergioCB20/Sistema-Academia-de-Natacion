@@ -10,7 +10,8 @@ import {
     limit,
     runTransaction,
     writeBatch,
-    arrayUnion
+    arrayUnion,
+    arrayRemove
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -208,9 +209,18 @@ export const studentService = {
     /**
      * Updates student basic info.
      */
-    async update(studentId: string, data: Partial<Omit<Student, 'id' | 'dni' | 'remainingCredits' | 'hasDebt'>>): Promise<void> {
+    async update(studentId: string, data: Partial<Omit<Student, 'id' | 'remainingCredits' | 'hasDebt'>>): Promise<void> {
         const ref = doc(db, STUDENTS_COLLECTION, studentId);
         await updateDoc(ref, data);
+
+        // If fixedSchedule was updated, sync slots
+        if (data.fixedSchedule) {
+            try {
+                await this.syncFixedScheduleToSlots(studentId, data.fixedSchedule);
+            } catch (e) {
+                console.error("Error syncing slots on update:", e);
+            }
+        }
     },
 
     /**
@@ -236,7 +246,7 @@ export const studentService = {
      * It looks ahead 4 weeks.
      */
     async syncFixedScheduleToSlots(studentId: string, fixedSchedule: Array<{ dayId: string, timeId: string }>): Promise<void> {
-        // Note: fixedSchedule now stores dayType patterns (e.g., "lun-mier-vier") in dayId field
+        // fixedSchedule now stores individual days (e.g., "LUN") in dayId field
         // and timeSlot (e.g., "13:00-14:00") in timeId field
 
         const batch = writeBatch(db);
@@ -254,21 +264,33 @@ export const studentService = {
         const snapshot = await getDocs(q);
 
         // Create a set of schedule patterns for quick lookup
-        // Each entry is "dayType_timeSlot" (e.g., "lun-mier-vier_13:00-14:00")
+        // Each entry is "DAYNAME_timeSlot" (e.g., "LUN_13:00-14:00")
         const scheduleSet = new Set(
             fixedSchedule.map(s => `${s.dayId}_${s.timeId}`)
         );
 
+        const dayNames = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+
         snapshot.docs.forEach(docSnap => {
             const data = docSnap.data();
 
-            // Match by dayType and timeSlot
-            if (data.dayType && data.timeSlot) {
-                const slotKey = `${data.dayType}_${data.timeSlot}`;
+            if (data.date && data.timeSlot) {
+                // Determine day of week for this slot from its date string
+                const slotDate = new Date(data.date + 'T12:00:00');
+                const dayOfWeek = slotDate.getDay();
+                const dayName = dayNames[dayOfWeek];
+
+                const slotKey = `${dayName}_${data.timeSlot}`;
 
                 if (scheduleSet.has(slotKey)) {
                     batch.update(docSnap.ref, {
                         attendeeIds: arrayUnion(studentId)
+                    });
+                    operations++;
+                } else {
+                    // If student was previously in this slot but it's no longer in their fixed schedule, remove them
+                    batch.update(docSnap.ref, {
+                        attendeeIds: arrayRemove(studentId)
                     });
                     operations++;
                 }

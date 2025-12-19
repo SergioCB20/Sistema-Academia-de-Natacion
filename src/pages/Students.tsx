@@ -14,15 +14,16 @@ import {
     CheckCircle,
     DollarSign,
     Printer,
-    Clock
+    Clock,
+    AlertCircle
 } from 'lucide-react';
 import { studentService } from '../services/students';
 import { categoryService } from '../services/categoryService';
-
-
+import { scheduleTemplateService } from '../services/scheduleTemplateService';
+import { paymentMethodService } from '../services/paymentMethodService';
 import { seasonService } from '../services/seasonService';
 import { packageValidationService } from '../services/packageValidation';
-import type { Student, PaymentMethod, Debt, Category, Package, Season, DayType } from '../types/db';
+import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplate, PaymentMethodConfig } from '../types/db';
 
 export default function Students() {
     const navigate = useNavigate();
@@ -33,8 +34,10 @@ export default function Students() {
     // Dynamic Data from DB
     const [categories, setCategories] = useState<Category[]>([]);
     const [availablePackages, setAvailablePackages] = useState<Package[]>([]);
-    const [loadingPackages, setLoadingPackages] = useState(false);
+    const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
+    const [loadingTemplates, setLoadingTemplates] = useState(false);
     const [activeSeason, setActiveSeason] = useState<Season | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -55,39 +58,42 @@ export default function Students() {
         email: '',
         birthDate: '',
         age: '',
-        categoryId: ''
+        categoryId: '',
+        packageId: '',
+        paymentMethodId: '' // Track the selected payment method ID
     });
 
     const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
-    const [selectedSchedulePattern, setSelectedSchedulePattern] = useState<{
-        dayType: DayType;
-        timeSlot: string;
-    } | null>(null);
     const [fixedSchedule, setFixedSchedule] = useState<Array<{ dayId: string, timeId: string }>>([]);
 
     const [paymentData, setPaymentData] = useState({
         amountPaid: '',
         totalCost: '0.00',
         credits: '12',
-        method: 'CASH' as PaymentMethod
+        methodId: '' // Use ID instead of hardcoded type
     });
+    const [availablePaymentMethods, setAvailablePaymentMethods] = useState<PaymentMethodConfig[]>([]);
 
     useEffect(() => {
         loadStudents();
         loadCategories();
         loadActiveSeason();
+        loadPaymentMethods();
     }, []);
 
-    // Load packages when category changes and we're on step 2
+    // Load templates when category changes and we're on step 2
     useEffect(() => {
-        if (step === 2 && formData.categoryId && !editingStudent && activeSeason) {
-            loadAvailablePackagesForCategory(formData.categoryId);
-            // Clear previously selected package and schedule when category changes
-            setSelectedPackage(null);
-            setSelectedSchedulePattern(null);
-            setFixedSchedule([]);
+        if (step === 2 && formData.categoryId && activeSeason) {
+            loadTemplates(formData.categoryId); // Category-specific templates
         }
     }, [step, formData.categoryId, activeSeason]);
+
+    // Load packages when season and category are available
+    useEffect(() => {
+        if (activeSeason && formData.categoryId) {
+            loadAvailablePackages(formData.categoryId);
+        }
+    }, [activeSeason, formData.categoryId]);
 
     const loadStudents = async () => {
         setLoading(true);
@@ -119,10 +125,26 @@ export default function Students() {
         }
     };
 
-    const loadAvailablePackagesForCategory = async (categoryId: string) => {
-        if (!categoryId || !activeSeason) return;
+    const loadPaymentMethods = async () => {
+        try {
+            await paymentMethodService.seedInitial();
+            const meths = await paymentMethodService.getActive();
+            setAvailablePaymentMethods(meths);
+        } catch (error) {
+            console.error("Error loading payment methods:", error);
+        }
+    };
 
-        setLoadingPackages(true);
+    // Auto-select first payment method when loaded or when opening a new form
+    useEffect(() => {
+        if (availablePaymentMethods.length > 0 && !paymentData.methodId) {
+            setPaymentData(prev => ({ ...prev, methodId: availablePaymentMethods[0].id }));
+        }
+    }, [availablePaymentMethods, paymentData.methodId, isModalOpen]);
+
+    const loadAvailablePackages = async (categoryId: string) => {
+        if (!activeSeason || !categoryId) return;
+
         try {
             const packages = await packageValidationService.getAvailablePackages(
                 activeSeason.id,
@@ -131,8 +153,32 @@ export default function Students() {
             setAvailablePackages(packages);
         } catch (error) {
             console.error("Error loading packages:", error);
+        }
+    };
+
+    const dayTypeLabels: Record<DayType, string> = {
+        'lun-mier-vier': 'L-M-V (Lun-Mie-Vie)',
+        'mar-juev': 'M-J (Mar-Jue)',
+        'sab-dom': 'S-D (Sab-Dom)'
+    };
+    const dayTypeMapMapping: Record<DayType, string[]> = {
+        'lun-mier-vier': ['LUN', 'MIE', 'VIE'],
+        'mar-juev': ['MAR', 'JUE'],
+        'sab-dom': ['SAB', 'DOM']
+    };
+
+    const loadTemplates = async (categoryId: string) => {
+        if (!activeSeason || !categoryId) return;
+
+        setLoadingTemplates(true);
+        try {
+            const allTemplates = await scheduleTemplateService.getBySeason(activeSeason.id);
+            // Load ALL templates to build the global grid
+            setTemplates(allTemplates);
+        } catch (error) {
+            console.error("Error loading templates:", error);
         } finally {
-            setLoadingPackages(false);
+            setLoadingTemplates(false);
         }
     };
 
@@ -140,12 +186,17 @@ export default function Students() {
 
     const handleCreateNew = () => {
         setEditingStudent(null);
-        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', categoryId: '' });
+        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', categoryId: '', packageId: '', paymentMethodId: '' });
         setFixedSchedule([]);
-        setPaymentData({ amountPaid: '', totalCost: '0.00', credits: '12', method: 'CASH' });
+        setPaymentData({
+            amountPaid: '',
+            totalCost: '0.00',
+            credits: '0',
+            methodId: '' // The useEffect will pick the first one from availablePaymentMethods
+        });
         setStep(1);
+        setSelectedPackage(null);
         setRegisteredStudentDni(null);
-
         setIsModalOpen(true);
     };
 
@@ -153,22 +204,24 @@ export default function Students() {
         setEditingStudent(student);
         setFormData({
             fullName: student.fullName,
-            dni: student.dni,
+            dni: student.dni.startsWith('TEMP_') ? '' : student.dni,
             phone: student.phone,
             email: student.email || '',
             birthDate: student.birthDate || '',
             age: student.age ? String(student.age) : '',
-            categoryId: student.categoryId || ''
+            categoryId: student.categoryId || '',
+            packageId: student.currentPackageId || '',
+            paymentMethodId: ''
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
         setIsModalOpen(true);
     };
 
-    const handleDelete = async (dni: string) => {
+    const handleDelete = async (studentId: string) => {
         if (!confirm("¿Estás seguro de eliminar este alumno COMPLETAMENTE?")) return;
         try {
-            await studentService.delete(dni);
+            await studentService.delete(studentId);
             loadStudents();
         } catch (error) {
             console.error("Error deleting student:", error);
@@ -194,14 +247,17 @@ export default function Students() {
             return;
         }
 
+        if (isSaving) return;
+        setIsSaving(true);
         try {
             if (editingStudent) {
-                await studentService.update(editingStudent.dni, {
+                await studentService.update(editingStudent.id, {
                     fullName: formData.fullName,
+                    dni: formData.dni,
                     phone: formData.phone,
                     email: formData.email,
                     birthDate: formData.birthDate,
-                    age: formData.age ? Number(formData.age) : undefined,
+                    age: formData.age ? Number(formData.age) : null,
                     categoryId: formData.categoryId,
                     fixedSchedule: fixedSchedule
                 });
@@ -210,18 +266,26 @@ export default function Students() {
             } else {
                 const newStudentDni = formData.dni || `TEMP_${Date.now()}`;
 
-                // Calculate package dates if package is selected
+                // Calculate package dates if package is selected or credits are added
                 let packageStartDate: string | undefined;
                 let packageEndDate: string | undefined;
 
-                if (selectedPackage && selectedSchedulePattern) {
+                if (Number(paymentData.credits) > 0 && fixedSchedule.length > 0) {
                     const startDate = new Date();
                     packageStartDate = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
+                    const sessionsPerWeek = fixedSchedule.length;
+
+                    // Create a temporary package object for calculation
+                    const tempPkg: Partial<Package> = {
+                        classesPerMonth: Number(paymentData.credits),
+                        duration: 1
+                    };
+
                     const endDate = packageValidationService.calculatePackageEndDate(
                         startDate,
-                        selectedPackage,
-                        selectedSchedulePattern.dayType
+                        tempPkg as Package,
+                        sessionsPerWeek
                     );
                     packageEndDate = endDate.toISOString().split('T')[0]; // YYYY-MM-DD
                 }
@@ -230,17 +294,17 @@ export default function Students() {
                     id: newStudentDni,
                     ...formData,
                     birthDate: formData.birthDate,
-                    age: formData.age ? Number(formData.age) : undefined,
+                    age: formData.age ? Number(formData.age) : null,
                     categoryId: formData.categoryId,
                     fixedSchedule: fixedSchedule,
-                    currentPackageId: selectedPackage?.id,
-                    packageStartDate,
-                    packageEndDate
+                    currentPackageId: selectedPackage?.id || null,
+                    packageStartDate: packageStartDate || null,
+                    packageEndDate: packageEndDate || null
                 }, {
                     amountPaid: Number(paymentData.amountPaid) || 0,
                     totalCost: Number(paymentData.totalCost) || 0,
                     credits: Number(paymentData.credits) || 0,
-                    method: paymentData.method
+                    method: paymentData.methodId
                 });
 
                 // Go to step 4 (confirmation) instead of closing
@@ -251,6 +315,8 @@ export default function Students() {
         } catch (error: any) {
             console.error("Error saving student:", error);
             alert(error.message || "Error al guardar");
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -279,7 +345,8 @@ export default function Students() {
         }
 
         try {
-            await studentService.payDebt(debt.id, payAmount, 'CASH');
+            const defaultMethod = availablePaymentMethods.find(m => m.isActive)?.id || 'CASH';
+            await studentService.payDebt(debt.id, payAmount, defaultMethod);
             alert("Deuda actualizada");
 
             const updatedDebts = await studentService.getDebts(studentForDebt!.dni);
@@ -333,19 +400,37 @@ export default function Students() {
             }
         }
 
-        if (step === 2 && !editingStudent) {
-            if (activeSeason && !selectedPackage && fixedSchedule.length === 0) {
-                if (!confirm("No has seleccionado ningún paquete. ¿Deseas continuar sin matrícula?")) {
+        if (step === 2) {
+            if (fixedSchedule.length === 0) {
+                if (!confirm("No has seleccionado ningún horario. ¿Deseas continuar?")) {
                     return;
                 }
-            } else if (selectedPackage && fixedSchedule.length === 0) {
-                if (!confirm("Has seleccionado un paquete pero no has elegido el patrón de horario. ¿Deseas continuar sin definir el horario?")) {
-                    return;
-                }
-            } else if (!selectedPackage && fixedSchedule.length === 0) {
-                if (!confirm("No has seleccionado ningún horario. ¿Deseas continuar sin horario fijo?")) {
-                    return;
-                }
+            }
+
+            // AUTO-CALCULATE PACKAGE FOR STEP 3
+            const sessionsPerWeek = fixedSchedule.length;
+            const monthlyCredits = sessionsPerWeek * 4;
+
+            // Find matching package
+            const matchingPkg = availablePackages.find(p => p.classesPerMonth === monthlyCredits);
+
+            if (matchingPkg) {
+                setFormData(prev => ({ ...prev, packageId: matchingPkg.id }));
+                setSelectedPackage(matchingPkg);
+                setPaymentData(prev => ({
+                    ...prev,
+                    credits: matchingPkg.classesPerMonth.toString(),
+                    totalCost: matchingPkg.price.toString()
+                }));
+            } else {
+                // No exact match, use custom
+                setFormData(prev => ({ ...prev, packageId: 'custom' }));
+                setSelectedPackage(null);
+                setPaymentData(prev => ({
+                    ...prev,
+                    credits: monthlyCredits.toString(),
+                    totalCost: '0.00' // Manual input required
+                }));
             }
         }
 
@@ -423,7 +508,7 @@ export default function Students() {
                                         <button onClick={() => handleEdit(student)} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
                                             <Pencil className="w-4 h-4" />
                                         </button>
-                                        <button onClick={() => handleDelete(student.dni)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                        <button onClick={() => handleDelete(student.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                                             <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
@@ -443,7 +528,9 @@ export default function Students() {
                                         </span>
                                     )}
                                 </h3>
-                                <p className="text-sm text-slate-400 font-mono mb-4">DNI: {student.dni}</p>
+                                <p className="text-sm text-slate-400 font-mono mb-4">
+                                    DNI: {student.dni.startsWith('TEMP_') ? '(Sin DNI)' : student.dni}
+                                </p>
 
                                 <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
                                     <Phone className="w-4 h-4" />
@@ -521,8 +608,13 @@ export default function Students() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-sm font-medium text-slate-700 mb-1">DNI (ID) <span className="text-slate-300 font-normal">(Opcional)</span></label>
-                                            <input disabled={!!editingStudent} type="text" maxLength={8} className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                                value={formData.dni} onChange={e => setFormData({ ...formData, dni: e.target.value.replace(/\D/g, '') })}
+                                            <input
+                                                disabled={!!editingStudent && !editingStudent.dni.startsWith('TEMP_')}
+                                                type="text"
+                                                maxLength={8}
+                                                className={`w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 ${!!editingStudent && !editingStudent.dni.startsWith('TEMP_') ? 'bg-slate-50 cursor-not-allowed' : ''}`}
+                                                value={formData.dni}
+                                                onChange={e => setFormData({ ...formData, dni: e.target.value.replace(/\D/g, '') })}
                                                 placeholder="8 dígitos"
                                             />
                                         </div>
@@ -553,142 +645,242 @@ export default function Students() {
                                     </div>
                                 </div>
                             )}
-
-                            {/* STEP 2: SCHEDULE */}
+                            {/* STEP 2: GROUPED SCHEDULE SELECTION */}
                             {step === 2 && (
-                                <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Selección de Paquete</h4>
-                                    <p className="text-xs text-slate-500 mb-4">
-                                        Selecciona un paquete disponible para <span className="font-bold">{currentCategory?.name}</span>
-                                    </p>
-
-                                    {loadingPackages ? (
-                                        <div className="text-center py-12">
-                                            <Clock className="w-8 h-8 animate-spin mx-auto text-slate-400 mb-2" />
-                                            <p className="text-slate-500">Cargando paquetes disponibles...</p>
+                                <div className="space-y-4 animate-in slide-in-from-right-4 duration-300 h-full flex flex-col">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Paso 2: Selección de Horario</h4>
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex items-center gap-2 bg-sky-50 px-3 py-1 rounded-full border border-sky-100">
+                                                <Clock className="w-3.5 h-3.5 text-sky-600" />
+                                                <span className="text-xs font-bold text-sky-700">
+                                                    {fixedSchedule.length} ses./sem.
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                                                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                                                <span className="text-xs font-bold text-emerald-700">
+                                                    {fixedSchedule.length * 4} clases/mes
+                                                </span>
+                                            </div>
                                         </div>
-                                    ) : availablePackages.length === 0 ? (
-                                        <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                            <p className="text-slate-500">No hay paquetes disponibles para esta categoría.</p>
-                                            <p className="text-xs text-slate-400 mt-2">Crea paquetes desde "Paquetes"</p>
+                                    </div>
+
+                                    {loadingTemplates ? (
+                                        <div className="flex-1 flex items-center justify-center p-12">
+                                            <Clock className="w-8 h-8 animate-spin text-sky-500 mr-3" />
+                                            <span className="text-slate-500">Cargando horarios disponibles...</span>
                                         </div>
                                     ) : (
-                                        <div className="space-y-6">
-                                            {/* Package Selection */}
-                                            {!selectedPackage ? (
-                                                <div className="space-y-3">
-                                                    <p className="text-xs font-bold text-slate-600 mb-2">PASO 1: Elige un paquete</p>
-                                                    {availablePackages.map((pkg) => (
-                                                        <button
-                                                            key={pkg.id}
-                                                            type="button"
-                                                            onClick={() => setSelectedPackage(pkg)}
-                                                            className="w-full p-4 rounded-xl border-2 border-slate-200 hover:border-sky-300 hover:shadow-sm transition-all text-left bg-white"
-                                                        >
-                                                            <div className="flex items-start justify-between mb-2">
-                                                                <div>
-                                                                    <h6 className="font-bold text-slate-800 mb-1">{pkg.name}</h6>
-                                                                    <p className="text-xs text-slate-500">
-                                                                        {pkg.classesPerMonth} clases/mes × {pkg.duration} {pkg.duration === 1 ? 'mes' : 'meses'}
-                                                                    </p>
-                                                                </div>
-                                                                <div className="text-right">
-                                                                    <p className="text-lg font-bold text-sky-600">S/ {pkg.price}</p>
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex gap-2 flex-wrap mt-2">
-                                                                {(Array.isArray(pkg.scheduleTypes) ? pkg.scheduleTypes : []).map((dayType) => (
-                                                                    <span key={dayType} className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
-                                                                        {dayType === 'lun-mier-vier' ? 'Lun-Mié-Vie' : dayType === 'mar-juev' ? 'Mar-Jue' : 'Sáb-Dom'}
-                                                                    </span>
-                                                                ))}
-                                                            </div>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    {/* Selected Package Summary */}
-                                                    <div className="bg-sky-50 p-4 rounded-xl border border-sky-200">
-                                                        <div className="flex items-start justify-between">
-                                                            <div>
-                                                                <p className="text-xs text-sky-600 font-bold mb-1">PAQUETE SELECCIONADO</p>
-                                                                <h6 className="font-bold text-slate-800">{selectedPackage.name}</h6>
-                                                                <p className="text-xs text-slate-600 mt-1">
-                                                                    {selectedPackage.classesPerMonth} clases/mes × {selectedPackage.duration} {selectedPackage.duration === 1 ? 'mes' : 'meses'} = {selectedPackage.classesPerMonth * selectedPackage.duration} clases totales
-                                                                </p>
-                                                            </div>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setSelectedPackage(null);
-                                                                    setSelectedSchedulePattern(null);
-                                                                    setFixedSchedule([]);
-                                                                }}
-                                                                className="text-xs text-sky-600 hover:text-sky-700 font-bold"
-                                                            >
-                                                                Cambiar
-                                                            </button>
-                                                        </div>
-                                                    </div>
+                                        <div className="flex-1 overflow-auto space-y-6 pr-2">
+                                            {(Object.keys(dayTypeLabels) as DayType[]).map(dayType => {
+                                                const typeTemplates = templates.filter(t =>
+                                                    t.dayType === dayType &&
+                                                    t.categoryId === formData.categoryId &&
+                                                    !t.isBreak
+                                                ).sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
 
-                                                    {/* Schedule Pattern Selection */}
-                                                    <div>
-                                                        <p className="text-xs font-bold text-slate-600 mb-2">PASO 2: Elige el patrón de horario</p>
-                                                        <div className="space-y-2">
-                                                            {(Array.isArray(selectedPackage.scheduleTypes) ? selectedPackage.scheduleTypes : []).map((dayType) => {
-                                                                const canComplete = activeSeason && packageValidationService.canCompleteBeforeSeasonEnd(
-                                                                    selectedPackage,
-                                                                    dayType,
-                                                                    activeSeason.endDate
+                                                if (typeTemplates.length === 0) return null;
+
+                                                return (
+                                                    <div key={dayType} className="space-y-3">
+                                                        <h5 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 px-1">
+                                                            <Calendar className="w-3 h-3" /> {dayTypeLabels[dayType]}
+                                                        </h5>
+                                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                            {typeTemplates.map(template => {
+                                                                const days = dayTypeMapMapping[template.dayType as DayType];
+                                                                const isSelected = days.every(dayId =>
+                                                                    fixedSchedule.some(fs => fs.dayId === dayId && fs.timeId === template.timeSlot)
                                                                 );
-                                                                const isSelected = selectedSchedulePattern?.dayType === dayType;
-
-                                                                // Calculate actual classes if cannot complete
-                                                                const actualClasses = !canComplete && activeSeason
-                                                                    ? packageValidationService.calculateActualClasses(new Date(), activeSeason.endDate, dayType)
-                                                                    : 0;
 
                                                                 return (
                                                                     <button
-                                                                        key={dayType}
+                                                                        key={template.id}
                                                                         type="button"
                                                                         onClick={() => {
-                                                                            // Allow selection even if time is insufficient, just warn visibly (UI already shows warning)
-                                                                            setSelectedSchedulePattern({ dayType, timeSlot: '' });
-                                                                            setFixedSchedule([{ dayId: dayType, timeId: '' }]);
+                                                                            if (isSelected) {
+                                                                                // Remove all days for this slot
+                                                                                setFixedSchedule(fixedSchedule.filter(fs =>
+                                                                                    !(days.includes(fs.dayId) && fs.timeId === template.timeSlot)
+                                                                                ));
+                                                                            } else {
+                                                                                // Add all days for this slot
+                                                                                const newSlots = days.map(dayId => ({
+                                                                                    dayId,
+                                                                                    timeId: template.timeSlot
+                                                                                }));
+                                                                                setFixedSchedule([...fixedSchedule, ...newSlots]);
+                                                                            }
                                                                         }}
-                                                                        className={`w-full p-3 rounded-lg border-2 transition-all text-left ${isSelected
-                                                                            ? 'bg-sky-600 text-white border-sky-600 shadow-md'
-                                                                            : !canComplete
-                                                                                ? 'bg-amber-50 border-amber-200 hover:border-amber-300'
-                                                                                : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-sm'
+                                                                        className={`p-4 rounded-2xl border-2 text-left transition-all group relative overflow-hidden ${isSelected
+                                                                            ? 'bg-sky-600 border-sky-600 shadow-lg shadow-sky-600/20'
+                                                                            : 'bg-white border-slate-100 hover:border-sky-200 hover:bg-sky-50/10'
                                                                             }`}
                                                                     >
-                                                                        <div className="flex items-center justify-between">
-                                                                            <div>
-                                                                                <p className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-slate-800'}`}>
-                                                                                    {dayType === 'lun-mier-vier' ? 'Lunes, Miércoles, Viernes' :
-                                                                                        dayType === 'mar-juev' ? 'Martes, Jueves' :
-                                                                                            'Sábado, Domingo'}
-                                                                                </p>
-                                                                                <p className={`text-xs ${isSelected ? 'text-sky-100' : 'text-slate-500'}`}>
-                                                                                    {packageValidationService.getClassesPerWeek(dayType)} clases por semana
-                                                                                </p>
-                                                                                {!canComplete && (
-                                                                                    <div className={`text-xs mt-1 font-bold ${isSelected ? 'text-red-200' : 'text-amber-600'}`}>
-                                                                                        <p>⚠️ La temporada termina antes de completar el paquete</p>
-                                                                                        <p className="mt-0.5 opacity-90">
-                                                                                            Solo se podrán dar {actualClasses} clases (El precio se mantiene)
-                                                                                        </p>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                            {isSelected && <CheckCircle className="w-5 h-5" />}
+                                                                        <div className="flex justify-between items-start mb-1 relative z-10">
+                                                                            <Clock className={`w-4 h-4 ${isSelected ? 'text-sky-100' : 'text-slate-400'}`} />
+                                                                            {isSelected && <CheckCircle className="w-4 h-4 text-white animate-in zoom-in" />}
                                                                         </div>
+                                                                        <p className={`text-lg font-black relative z-10 ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+                                                                            {template.timeSlot}
+                                                                        </p>
+                                                                        <p className={`text-[10px] uppercase font-bold tracking-tight relative z-10 ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>
+                                                                            {template.capacity} Cupos
+                                                                        </p>
+
+                                                                        {/* Decorative background element */}
+                                                                        {isSelected && (
+                                                                            <div className="absolute -right-2 -bottom-2 w-12 h-12 bg-white/10 rounded-full blur-xl" />
+                                                                        )}
                                                                     </button>
                                                                 );
                                                             })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {templates.filter(t => t.categoryId === formData.categoryId && !t.isBreak).length === 0 && (
+                                                <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                                    <AlertCircle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                                    <p className="text-slate-500 font-medium">No hay horarios configurados para {currentCategory?.name}</p>
+                                                    <p className="text-xs text-slate-400 mt-1">Configure la plantilla en el panel de administrador.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="bg-slate-900 text-white p-4 rounded-xl flex items-center justify-between shadow-xl shrink-0 mt-auto">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-sky-500/20 rounded-lg flex items-center justify-center">
+                                                <Calendar className="w-5 h-5 text-sky-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] text-slate-400 uppercase font-bold">Total de Sesiones</p>
+                                                <p className="text-lg font-bold">
+                                                    {fixedSchedule.length} <span className="text-sm font-normal text-slate-400">por semana</span> • {fixedSchedule.length * 4} <span className="text-sm font-normal text-slate-400">por mes</span>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* STEP 3: PACKAGE & PAYMENT */}
+                            {step === 3 && (
+                                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Paso 3: Matrícula y Pago</h4>
+
+                                    {!editingStudent && (
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">Seleccionar Paquete</label>
+                                                <select
+                                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white font-bold text-slate-700 transition-all"
+                                                    value={formData.packageId}
+                                                    onChange={(e) => {
+                                                        const pkgId = e.target.value;
+                                                        setFormData({ ...formData, packageId: pkgId });
+                                                        if (pkgId === 'custom') {
+                                                            setSelectedPackage(null);
+                                                            setPaymentData({ ...paymentData, credits: '', totalCost: '' });
+                                                        } else {
+                                                            const pkg = availablePackages.find(p => p.id === pkgId);
+                                                            if (pkg) {
+                                                                setSelectedPackage(pkg);
+                                                                setPaymentData({
+                                                                    ...paymentData,
+                                                                    credits: pkg.classesPerMonth.toString(),
+                                                                    totalCost: pkg.price.toString()
+                                                                });
+                                                            }
+                                                        }
+                                                    }}
+                                                >
+                                                    <option value="">Seleccione un paquete...</option>
+                                                    {availablePackages.map(pkg => (
+                                                        <option key={pkg.id} value={pkg.id}>
+                                                            {pkg.name} - S/ {pkg.price} ({pkg.classesPerMonth} clases)
+                                                        </option>
+                                                    ))}
+                                                    <option value="custom">✨ PAQUETE PERSONALIZADO</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Clases a cargar</label>
+                                                    <div className="relative">
+                                                        <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="number"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold"
+                                                            value={paymentData.credits}
+                                                            placeholder="0"
+                                                            onChange={e => setPaymentData({ ...paymentData, credits: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Costo Total</label>
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">S/</span>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-sky-600"
+                                                            value={paymentData.totalCost}
+                                                            placeholder="0.00"
+                                                            onChange={e => setPaymentData({ ...paymentData, totalCost: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">A Cuenta (Pagado)</label>
+                                                    <div className="relative">
+                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">S/</span>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-emerald-600"
+                                                            value={paymentData.amountPaid}
+                                                            placeholder="0.00"
+                                                            onChange={e => setPaymentData({ ...paymentData, amountPaid: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Método de Pago</label>
+                                                    <select
+                                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white font-bold text-slate-700"
+                                                        value={paymentData.methodId}
+                                                        onChange={e => setPaymentData({ ...paymentData, methodId: e.target.value })}
+                                                    >
+                                                        {availablePaymentMethods.length === 0 && (
+                                                            <option value="">No hay métodos de pago</option>
+                                                        )}
+                                                        {availablePaymentMethods.map(m => (
+                                                            <option key={m.id} value={m.id}>
+                                                                {m.name.toUpperCase()}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {debtAmount > 0 && (
+                                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 flex justify-between items-center animate-in zoom-in-95">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 bg-amber-200/50 rounded-full flex items-center justify-center">
+                                                            <Calendar className="w-5 h-5 text-amber-700" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[10px] text-amber-600 uppercase font-black">Deuda Pendiente</p>
+                                                            <p className="text-xl font-black text-amber-900">
+                                                                S/ {debtAmount.toFixed(2)}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -696,78 +888,10 @@ export default function Students() {
                                         </div>
                                     )}
 
-                                    <p className="text-sm text-right text-slate-500 font-bold mt-4">
-                                        {!selectedPackage
-                                            ? 'Selecciona un paquete para continuar'
-                                            : !selectedSchedulePattern
-                                                ? '⚠️ Debes seleccionar un patrón de horario'
-                                                : '✓ Paquete y horario seleccionados'}
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* STEP 3: PAYMENT */}
-                            {step === 3 && (
-                                <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Pago Inicial y Deuda</h4>
-
-                                    {editingStudent ? (
-                                        <div className="bg-slate-50 p-4 rounded-xl text-center text-slate-500">
-                                            <p>La edición de pagos se realiza en el módulo de Finanzas.</p>
-                                            <p className="text-xs mt-2">Sólo se guardarán los cambios de Datos Personales y Horario.</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Número de clases </label>
-                                                    <input type="number" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                                        value={paymentData.credits} onChange={e => setPaymentData({ ...paymentData, credits: e.target.value })}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Costo Total</label>
-                                                    <div className="relative">
-                                                        <span className="absolute left-3 top-2 text-slate-400">S/</span>
-                                                        <input type="number" className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                                            value={paymentData.totalCost} onChange={e => setPaymentData({ ...paymentData, totalCost: e.target.value })}
-                                                            placeholder="0.00"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">A Cuenta (Pagado)</label>
-                                                    <div className="relative">
-                                                        <span className="absolute left-3 top-2 text-slate-400">S/</span>
-                                                        <input type="number" className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold"
-                                                            value={paymentData.amountPaid} onChange={e => setPaymentData({ ...paymentData, amountPaid: e.target.value })}
-                                                            placeholder="0.00"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Método de Pago</label>
-                                                    <select className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white"
-                                                        value={paymentData.method} onChange={e => setPaymentData({ ...paymentData, method: e.target.value as PaymentMethod })}
-                                                    >
-                                                        <option value="CASH">EFECTIVO</option>
-                                                        <option value="YAPE">YAPE / PLIN</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-
-                                            {debtAmount > 0 && (
-                                                <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl border border-red-100 flex justify-between items-center animate-in zoom-in duration-200">
-                                                    <div className="flex items-center gap-2">
-                                                        <Calendar className="w-5 h-5" />
-                                                        <span className="text-sm font-medium">Deuda Pendiente</span>
-                                                    </div>
-                                                    <span className="text-xl font-bold">S/ {debtAmount.toFixed(2)}</span>
-                                                </div>
-                                            )}
+                                    {editingStudent && (
+                                        <div className="bg-slate-50 p-8 rounded-2xl text-center border-2 border-dashed border-slate-200">
+                                            <p className="font-bold text-slate-600">Gestión de Finanzas</p>
+                                            <p className="text-sm text-slate-400 mt-2">Los pagos deben editarse desde el módulo de Finanzas para mantener el historial.</p>
                                         </div>
                                     )}
                                 </div>
@@ -834,9 +958,26 @@ export default function Students() {
                                         Siguiente <ArrowRight className="w-4 h-4" />
                                     </button>
                                 ) : (
-                                    <button onClick={handleSubmit} type="button" className="px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-2 shadow-lg shadow-emerald-600/20">
-                                        <CheckCircle className="w-4 h-4" />
-                                        {editingStudent ? 'Actualizar Alumno' : 'Finalizar Registro'}
+                                    <button
+                                        onClick={handleSubmit}
+                                        type="button"
+                                        disabled={isSaving}
+                                        className={`px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg transition-all ${isSaving
+                                            ? 'bg-emerald-400 cursor-not-allowed text-white/80'
+                                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
+                                            }`}
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                                <span>Guardando...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CheckCircle className="w-4 h-4" />
+                                                {editingStudent ? 'Actualizar Alumno' : 'Finalizar Registro'}
+                                            </>
+                                        )}
                                     </button>
                                 )}
                             </div>
@@ -886,7 +1027,8 @@ export default function Students() {
                         </div>
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }

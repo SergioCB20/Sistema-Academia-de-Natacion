@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
 import { financeService, DailyFinanceData } from '../services/finance';
+import { paymentMethodService } from '../services/paymentMethodService';
+import { PaymentMethodConfig } from '../types/db';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { DollarSign, Calendar, Filter } from 'lucide-react';
+import { DollarSign, Filter } from 'lucide-react';
 
 export default function Finance() {
     const [data, setData] = useState<DailyFinanceData[]>([]);
+    const [methods, setMethods] = useState<PaymentMethodConfig[]>([]);
     const [year, setYear] = useState(new Date().getFullYear());
     const [month, setMonth] = useState(new Date().getMonth());
-    const [methodFilter, setMethodFilter] = useState<'ALL' | 'CASH' | 'YAPE'>('ALL');
+    const [methodFilter, setMethodFilter] = useState<string>('ALL');
     const [loading, setLoading] = useState(true);
 
     const months = [
@@ -16,10 +19,23 @@ export default function Finance() {
     ];
 
     useEffect(() => {
-        loadData();
+        loadInitialData();
+    }, []);
+
+    useEffect(() => {
+        loadFinanceData();
     }, [year, month]);
 
-    const loadData = async () => {
+    const loadInitialData = async () => {
+        try {
+            const meths = await paymentMethodService.getAll();
+            setMethods(meths);
+        } catch (error) {
+            console.error("Error loading initial data:", error);
+        }
+    };
+
+    const loadFinanceData = async () => {
         setLoading(true);
         try {
             const result = await financeService.getMonthlyIncome(year, month);
@@ -34,9 +50,7 @@ export default function Finance() {
     const getTotal = () => {
         return data.reduce((acc, curr) => {
             if (methodFilter === 'ALL') return acc + curr.total;
-            if (methodFilter === 'CASH') return acc + curr.cash;
-            if (methodFilter === 'YAPE') return acc + curr.yape;
-            return acc;
+            return acc + (curr.methods[methodFilter] || 0);
         }, 0);
     };
 
@@ -67,20 +81,28 @@ export default function Finance() {
                 </div>
             </div>
 
-            {/* SUMMARY CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
-                            <DollarSign className="w-6 h-6" />
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-slate-400">Total Ingresos ({months[month]})</p>
-                            <p className="text-2xl font-bold text-slate-800">S/ {getTotal().toFixed(2)}</p>
+            {loading ? (
+                <div className="flex justify-center py-20">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
+                </div>
+            ) : (
+                <>
+                    {/* SUMMARY CARDS */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+                                    <DollarSign className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-slate-400">Total Ingresos ({months[month]})</p>
+                                    <p className="text-2xl font-bold text-slate-800">S/ {getTotal().toFixed(2)}</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
+                </>
+            )}
 
             {/* CHART SECTION */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -91,11 +113,12 @@ export default function Finance() {
                         <select
                             className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                             value={methodFilter}
-                            onChange={(e) => setMethodFilter(e.target.value as any)}
+                            onChange={(e) => setMethodFilter(e.target.value)}
                         >
                             <option value="ALL">Todo</option>
-                            <option value="CASH">Efectivo</option>
-                            <option value="YAPE">Yape/Plin</option>
+                            {methods.map(m => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
                         </select>
                     </div>
                 </div>
@@ -110,7 +133,6 @@ export default function Finance() {
                                 fontSize={12}
                                 tickLine={false}
                                 axisLine={false}
-                                tickFormatter={(value) => `${value}`} // Just the number
                             />
                             <YAxis
                                 stroke="#94a3b8"
@@ -126,16 +148,14 @@ export default function Finance() {
                                 labelFormatter={(label) => `Día ${label} de ${months[month]}`}
                             />
 
-                            {/* Conditional Rendering of Bars based on Filter */}
-                            {methodFilter === 'ALL' && (
-                                <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                            )}
-                            {methodFilter === 'CASH' && (
-                                <Bar dataKey="cash" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                            )}
-                            {methodFilter === 'YAPE' && (
-                                <Bar dataKey="yape" fill="#d946ef" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                            )}
+                            {/* Dynamic Bar Data */}
+                            <Bar
+                                dataKey={methodFilter === 'ALL' ? 'total' : (d) => d.methods[methodFilter] || 0}
+                                fill={methodFilter === 'ALL' ? "#3b82f6" : "#10b981"}
+                                radius={[4, 4, 0, 0]}
+                                maxBarSize={50}
+                                name="Ingreso"
+                            />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>

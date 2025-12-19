@@ -16,6 +16,7 @@ import Categories from './pages/admin/Categories';
 import Seasons from './pages/admin/Seasons';
 import Packages from './pages/admin/Packages';
 import ScheduleTemplates from './pages/admin/ScheduleTemplates';
+import PaymentMethods from './pages/admin/PaymentMethods';
 
 function App() {
   return (
@@ -67,6 +68,11 @@ function App() {
               <Route path="admin/plantillas" element={
                 <ProtectedRoute allowedRoles={['ADMIN']}>
                   <ScheduleTemplates />
+                </ProtectedRoute>
+              } />
+              <Route path="admin/pagos" element={
+                <ProtectedRoute allowedRoles={['ADMIN']}>
+                  <PaymentMethods />
                 </ProtectedRoute>
               } />
             </Route>

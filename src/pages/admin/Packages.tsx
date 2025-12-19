@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { packageService } from '../../services/packageService';
 import { categoryService } from '../../services/categoryService';
 import { useSeason } from '../../contexts/SeasonContext';
-import type { Package, Category, DayType } from '../../types/db';
+import type { Package, Category } from '../../types/db';
 
 export default function Packages() {
     const { currentSeason } = useSeason();
@@ -16,8 +16,6 @@ export default function Packages() {
         classesPerMonth: 8,
         duration: 1,
         price: 0,
-        scheduleTypes: [] as DayType[],
-        applicableCategories: [] as string[],
         isActive: true
     });
 
@@ -50,7 +48,9 @@ export default function Packages() {
         try {
             const packageData = {
                 ...formData,
-                seasonId: currentSeason.id
+                seasonId: currentSeason.id,
+                scheduleTypes: [], // Universal
+                applicableCategories: ['all'] // Universal
             };
 
             if (editingPackage) {
@@ -74,8 +74,6 @@ export default function Packages() {
             classesPerMonth: pkg.classesPerMonth,
             duration: pkg.duration,
             price: pkg.price,
-            scheduleTypes: pkg.scheduleTypes,
-            applicableCategories: pkg.applicableCategories,
             isActive: pkg.isActive
         });
         setShowModal(true);
@@ -100,37 +98,8 @@ export default function Packages() {
             classesPerMonth: 8,
             duration: 1,
             price: 0,
-            scheduleTypes: [],
-            applicableCategories: [],
             isActive: true
         });
-    };
-
-    const toggleScheduleType = (type: DayType) => {
-        setFormData(prev => ({
-            ...prev,
-            scheduleTypes: prev.scheduleTypes.includes(type)
-                ? prev.scheduleTypes.filter(t => t !== type)
-                : [...prev.scheduleTypes, type]
-        }));
-    };
-
-    const toggleCategory = (categoryId: string) => {
-        setFormData(prev => ({
-            ...prev,
-            applicableCategories: prev.applicableCategories.includes(categoryId)
-                ? prev.applicableCategories.filter(c => c !== categoryId)
-                : [...prev.applicableCategories, categoryId]
-        }));
-    };
-
-    const toggleAllCategories = () => {
-        setFormData(prev => ({
-            ...prev,
-            applicableCategories: prev.applicableCategories.includes('all')
-                ? []
-                : ['all']
-        }));
     };
 
     if (!currentSeason) {
@@ -196,31 +165,6 @@ export default function Packages() {
                                             {pkg.isActive ? 'Activo' : 'Inactivo'}
                                         </span>
                                     </div>
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <span className="text-xs text-gray-500">Horarios:</span>
-                                    {Array.isArray(pkg.scheduleTypes) && pkg.scheduleTypes.map(type => (
-                                        <span key={type} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                                            {type}
-                                        </span>
-                                    ))}
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                    <span className="text-xs text-gray-500">Categorías:</span>
-                                    {Array.isArray(pkg.applicableCategories) && pkg.applicableCategories.includes('all') ? (
-                                        <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded">
-                                            Todas
-                                        </span>
-                                    ) : (
-                                        Array.isArray(pkg.applicableCategories) && pkg.applicableCategories.map(catId => {
-                                            const cat = categories.find(c => c.id === catId);
-                                            return cat ? (
-                                                <span key={catId} className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">
-                                                    {cat.name}
-                                                </span>
-                                            ) : null;
-                                        })
-                                    )}
                                 </div>
                             </div>
                             <div className="flex gap-2 ml-4">
@@ -301,53 +245,6 @@ export default function Packages() {
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                                             required
                                         />
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Tipos de Horario
-                                    </label>
-                                    <div className="space-y-2">
-                                        {(['lun-mier-vier', 'mar-juev', 'sab-dom'] as DayType[]).map(type => (
-                                            <label key={type} className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.scheduleTypes.includes(type)}
-                                                    onChange={() => toggleScheduleType(type)}
-                                                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700">{type}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Categorías Aplicables
-                                    </label>
-                                    <div className="space-y-2">
-                                        <label className="flex items-center">
-                                            <input
-                                                type="checkbox"
-                                                checked={formData.applicableCategories.includes('all')}
-                                                onChange={toggleAllCategories}
-                                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                            />
-                                            <span className="ml-2 text-sm font-medium text-gray-700">Todas las categorías</span>
-                                        </label>
-                                        {!formData.applicableCategories.includes('all') && categories.map(cat => (
-                                            <label key={cat.id} className="flex items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={formData.applicableCategories.includes(cat.id)}
-                                                    onChange={() => toggleCategory(cat.id)}
-                                                    className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                                                />
-                                                <span className="ml-2 text-sm text-gray-700">{cat.name}</span>
-                                            </label>
-                                        ))}
                                     </div>
                                 </div>
 

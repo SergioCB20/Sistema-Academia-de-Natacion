@@ -5,14 +5,11 @@ import { Payment, PaymentMethod } from '../types/db';
 export interface DailyFinanceData {
     day: number;
     total: number;
-    cash: number;
-    yape: number;
-    // Add other methods if needed
+    methods: Record<string, number>; // Dynamic totals per method ID
 }
 
 export const financeService = {
     async getMonthlyIncome(year: number, month: number): Promise<DailyFinanceData[]> {
-        // Month is 0-indexed in JS Date, but input usually 1-12 or 0-11. Let's assume 0-11.
         const start = new Date(year, month, 1).getTime();
         const end = new Date(year, month + 1, 0, 23, 59, 59).getTime();
 
@@ -25,24 +22,22 @@ export const financeService = {
         const snap = await getDocs(q);
         const payments = snap.docs.map(doc => doc.data() as Payment);
 
-        // Initialize array for all days in month
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const dailyData: DailyFinanceData[] = Array.from({ length: daysInMonth }, (_, i) => ({
             day: i + 1,
             total: 0,
-            cash: 0,
-            yape: 0
+            methods: {}
         }));
 
         payments.forEach(p => {
             const date = new Date(p.date);
-            const day = date.getDate(); // 1-31
+            const day = date.getDate();
             const entry = dailyData[day - 1];
 
-            if (entry) {
-                entry.total += (p.amount || 0);
-                if (p.method === 'CASH') entry.cash += (p.amount || 0);
-                else if (p.method === 'YAPE') entry.yape += (p.amount || 0);
+            if (entry && p.amount) {
+                entry.total += p.amount;
+                const methodId = p.method || 'OTHER';
+                entry.methods[methodId] = (entry.methods[methodId] || 0) + p.amount;
             }
         });
 

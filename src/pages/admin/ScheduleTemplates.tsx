@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { scheduleTemplateService } from '../../services/scheduleTemplateService';
 import { categoryService } from '../../services/categoryService';
+import { seasonService } from '../../services/seasonService';
 import { useSeason } from '../../contexts/SeasonContext';
-import type { ScheduleTemplate, Category, DayType } from '../../types/db';
+import type { ScheduleTemplate, Category, DayType, Season } from '../../types/db';
 
 export default function ScheduleTemplates() {
     const { currentSeason } = useSeason();
     const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
+    const [seasons, setSeasons] = useState<Season[]>([]);
+    const [selectedSeasonId, setSelectedSeasonId] = useState<string>('');
     const [isLoading, setIsLoading] = useState(true);
+    const [isSyncing, setIsSyncing] = useState(false);
     const [showModal, setShowModal] = useState(false);
-    const [showGenerateModal, setShowGenerateModal] = useState(false);
+    const [editingTemplate, setEditingTemplate] = useState<ScheduleTemplate | null>(null);
     const [formData, setFormData] = useState({
         dayType: 'lun-mier-vier' as DayType,
         timeSlot: '06:00-07:00',
@@ -18,31 +22,62 @@ export default function ScheduleTemplates() {
         capacity: 12,
         isBreak: false
     });
-    const [generateData, setGenerateData] = useState({
-        startDate: '',
-        endDate: ''
-    });
 
+    // Load all seasons on mount
     useEffect(() => {
-        loadData();
+        loadSeasons();
+    }, []);
+
+    // Set initial selected season when currentSeason loads
+    useEffect(() => {
+        if (currentSeason && !selectedSeasonId) {
+            setSelectedSeasonId(currentSeason.id);
+        }
     }, [currentSeason]);
 
-    const loadData = async () => {
-        if (!currentSeason) return;
+    // Load templates when selected season changes
+    useEffect(() => {
+        if (selectedSeasonId) {
+            loadTemplates();
+        }
+    }, [selectedSeasonId]);
+
+    const loadSeasons = async () => {
+        try {
+            const allSeasons = await seasonService.getAll();
+            setSeasons(allSeasons);
+            // Also load categories
+            const cats = await categoryService.getActive();
+            setCategories(cats);
+        } catch (error) {
+            console.error('Error loading seasons:', error);
+        }
+    };
+
+    const loadTemplates = async () => {
+        if (!selectedSeasonId) return;
 
         try {
             setIsLoading(true);
-            const [temps, cats] = await Promise.all([
-                scheduleTemplateService.getBySeason(currentSeason.id),
-                categoryService.getActive()
-            ]);
+            const temps = await scheduleTemplateService.getBySeason(selectedSeasonId);
             setTemplates(temps);
-            setCategories(cats);
         } catch (error) {
-            console.error('Error loading data:', error);
+            console.error('Error loading templates:', error);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const openEditModal = (template: ScheduleTemplate) => {
+        setEditingTemplate(template);
+        setFormData({
+            dayType: template.dayType,
+            timeSlot: template.timeSlot,
+            categoryId: template.categoryId || '',
+            capacity: template.capacity,
+            isBreak: template.isBreak
+        });
+        setShowModal(true);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -69,7 +104,27 @@ export default function ScheduleTemplates() {
             return;
         }
 
-        // Helper: Check overlap
+        // If editing, skip complex validation and just update
+        if (editingTemplate) {
+            try {
+                await scheduleTemplateService.update(editingTemplate.id, {
+                    dayType: formData.dayType,
+                    timeSlot: formData.timeSlot,
+                    categoryId: formData.categoryId,
+                    capacity: formData.capacity,
+                    isBreak: formData.isBreak
+                });
+                await loadTemplates();
+                handleCloseModal();
+                return;
+            } catch (error) {
+                console.error('Error updating template:', error);
+                alert('Error al actualizar plantilla');
+                return;
+            }
+        }
+
+        // Helper: Check overlap (only for new templates)
         const isOverlapping = (start1: number, end1: number, start2: number, end2: number) => {
             return Math.max(start1, start2) < Math.min(end1, end2);
         };
@@ -94,7 +149,7 @@ export default function ScheduleTemplates() {
                 }
 
                 newTemplatesToCreate.push({
-                    seasonId: currentSeason.id,
+                    seasonId: selectedSeasonId,
                     ...formData,
                     timeSlot: `${formatTime(currentStart)}-${formatTime(currentEnd)}`
                 });
@@ -103,7 +158,7 @@ export default function ScheduleTemplates() {
             }
         } else {
             newTemplatesToCreate.push({
-                seasonId: currentSeason.id,
+                seasonId: selectedSeasonId,
                 ...formData
             });
         }
@@ -134,6 +189,7 @@ export default function ScheduleTemplates() {
         }
 
         try {
+            // Creating new template(s)
             if (newTemplatesToCreate.length > 1) {
                 if (!confirm(`Se detectó un rango de ${duration} minutos. Se crearán ${newTemplatesToCreate.length} bloques de hora individual: ${newTemplatesToCreate.map(t => t.timeSlot).join(', ')}. ¿Continuar?`)) {
                     return;
@@ -143,7 +199,7 @@ export default function ScheduleTemplates() {
                 await scheduleTemplateService.create(newTemplatesToCreate[0]);
             }
 
-            await loadData();
+            await loadTemplates();
             handleCloseModal();
         } catch (error) {
             console.error('Error saving template:', error);
@@ -156,33 +212,59 @@ export default function ScheduleTemplates() {
 
         try {
             await scheduleTemplateService.delete(id);
-            await loadData();
+            await loadTemplates();
         } catch (error) {
             console.error('Error deleting template:', error);
         }
     };
 
-    const handleGenerateSlots = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!currentSeason) return;
+    const handleSyncSchedules = async () => {
+        if (!selectedSeasonId) return;
 
+        const selectedSeason = seasons.find(s => s.id === selectedSeasonId);
+        if (!selectedSeason) {
+            alert('No se encontró la temporada seleccionada');
+            return;
+        }
+
+        if (templates.length === 0) {
+            alert('No hay plantillas para sincronizar. Crea al menos una plantilla primero.');
+            return;
+        }
+
+        const confirmMsg = `¿Sincronizar horarios para "${selectedSeason.name}"?\n\nEsto regenerará todos los slots diarios desde ${new Date(selectedSeason.startDate).toLocaleDateString()} hasta ${new Date(selectedSeason.endDate).toLocaleDateString()} basándose en la plantilla actual.`;
+
+        if (!confirm(confirmMsg)) return;
+
+        setIsSyncing(true);
         try {
-            await scheduleTemplateService.generateDailySlots(
-                currentSeason.id,
-                generateData.startDate,
-                generateData.endDate
+            // Format dates as YYYY-MM-DD
+            const formatDate = (date: Date) => {
+                const d = new Date(date);
+                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            };
+
+            const startDate = formatDate(selectedSeason.startDate);
+            const endDate = formatDate(selectedSeason.endDate);
+
+            const slotsCreated = await scheduleTemplateService.generateDailySlots(
+                selectedSeasonId,
+                startDate,
+                endDate
             );
 
-            alert(`Se generaró el nuevo horario exitosamente`);
-            setShowGenerateModal(false);
+            alert(`✅ Sincronización completada!\n\nSe generaron ${slotsCreated} slots diarios para "${selectedSeason.name}".`);
         } catch (error) {
-            console.error('Error generating slots:', error);
-            alert('Error al generar slots');
+            console.error('Error syncing schedules:', error);
+            alert('Error al sincronizar horarios');
+        } finally {
+            setIsSyncing(false);
         }
     };
 
     const handleCloseModal = () => {
         setShowModal(false);
+        setEditingTemplate(null);
         setFormData({
             dayType: 'lun-mier-vier',
             timeSlot: '06:00-07:00',
@@ -201,17 +283,17 @@ export default function ScheduleTemplates() {
 
     const timeSlots = Object.keys(groupedTemplates).sort();
 
-    if (!currentSeason) {
+    if (seasons.length === 0) {
         return (
             <div className="p-6">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <p className="text-yellow-800">No hay temporada activa.</p>
+                    <p className="text-yellow-800">No hay temporadas creadas. Ve a Configuración → Temporadas para crear una.</p>
                 </div>
             </div>
         );
     }
 
-    if (isLoading) {
+    if (isLoading && templates.length === 0) {
         return (
             <div className="flex items-center justify-center h-64">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
@@ -224,23 +306,44 @@ export default function ScheduleTemplates() {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Plantilla de Horario</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Temporada: {currentSeason.name}
-                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                        <span className="text-sm text-gray-500">Temporada:</span>
+                        <select
+                            value={selectedSeasonId}
+                            onChange={(e) => setSelectedSeasonId(e.target.value)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"
+                        >
+                            {seasons.map(season => (
+                                <option key={season.id} value={season.id}>
+                                    {season.type === 'summer' ? '☀️' : '❄️'} {season.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 <div className="flex gap-3">
                     <button
-                        onClick={() => setShowGenerateModal(true)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                        disabled={templates.length === 0}
+                        onClick={handleSyncSchedules}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        disabled={templates.length === 0 || isSyncing}
                     >
-                        ⚡ Generar Horario
+                        {isSyncing ? (
+                            <>
+                                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                                Sincronizando...
+                            </>
+                        ) : (
+                            <>🔄 Sincronizar Horarios</>
+                        )}
                     </button>
                     <button
                         onClick={() => setShowModal(true)}
                         className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                     >
-                        + Modificar Plantilla
+                        + Nueva Plantilla
                     </button>
                 </div>
             </div>
@@ -294,11 +397,13 @@ export default function ScheduleTemplates() {
                                                                     className="group relative"
                                                                 >
                                                                     <div
-                                                                        className="px-2 py-1 rounded text-xs text-center cursor-pointer"
+                                                                        onClick={() => openEditModal(template)}
+                                                                        className="px-2 py-1 rounded text-xs text-center cursor-pointer hover:opacity-80 transition-opacity"
                                                                         style={{
                                                                             backgroundColor: category?.color || '#gray',
                                                                             color: template.isBreak ? 'black' : 'white'
                                                                         }}
+                                                                        title="Click para editar"
                                                                     >
                                                                         {template.isBreak ? (
                                                                             <span>DESCANSO</span>
@@ -334,7 +439,7 @@ export default function ScheduleTemplates() {
             {showModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-lg p-6 w-full max-w-md">
-                        <h2 className="text-xl font-bold mb-4">Nueva Plantilla</h2>
+                        <h2 className="text-xl font-bold mb-4">{editingTemplate ? 'Editar Plantilla' : 'Nueva Plantilla'}</h2>
                         <form onSubmit={handleSubmit}>
                             <div className="space-y-4">
                                 <div>
@@ -356,14 +461,57 @@ export default function ScheduleTemplates() {
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
                                         Horario
                                     </label>
-                                    <input
-                                        type="text"
-                                        value={formData.timeSlot}
-                                        onChange={(e) => setFormData({ ...formData, timeSlot: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                        placeholder="06:00-07:00"
-                                        required
-                                    />
+                                    <div className="flex">
+                                        <input
+                                            type="text"
+                                            value={formData.timeSlot}
+                                            onChange={(e) => setFormData({ ...formData, timeSlot: e.target.value })}
+                                            className="flex-1 px-3 py-2 border rounded-l-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                            placeholder="06:00-07:00"
+                                            required
+                                        />
+                                        <div className="flex flex-col border-t border-b border-r rounded-r-lg overflow-hidden">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const [start, end] = formData.timeSlot.split('-');
+                                                    if (!start || !end) return;
+                                                    const [startH, startM] = start.split(':').map(Number);
+                                                    const [endH, endM] = end.split(':').map(Number);
+                                                    if (endH >= 23) return; // Prevent going past 23:00
+                                                    const newStart = `${String(startH + 1).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+                                                    const newEnd = `${String(endH + 1).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+                                                    setFormData({ ...formData, timeSlot: `${newStart}-${newEnd}` });
+                                                }}
+                                                className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors flex items-center justify-center"
+                                                title="Subir 1 hora"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const [start, end] = formData.timeSlot.split('-');
+                                                    if (!start || !end) return;
+                                                    const [startH, startM] = start.split(':').map(Number);
+                                                    const [endH, endM] = end.split(':').map(Number);
+                                                    if (startH <= 0) return; // Prevent going below 00:00
+                                                    const newStart = `${String(startH - 1).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+                                                    const newEnd = `${String(endH - 1).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+                                                    setFormData({ ...formData, timeSlot: `${newStart}-${newEnd}` });
+                                                }}
+                                                className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors flex items-center justify-center border-t"
+                                                title="Bajar 1 hora"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-1">Usa las flechas o edita manualmente (ej: 11:30-12:30)</p>
                                 </div>
 
                                 <div>
@@ -423,67 +571,7 @@ export default function ScheduleTemplates() {
                                     type="submit"
                                     className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                                 >
-                                    Crear
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Generate Slots Modal */}
-            {showGenerateModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 w-full max-w-md">
-                        <h2 className="text-xl font-bold mb-4">Generar Slots Diarios</h2>
-                        <form onSubmit={handleGenerateSlots}>
-                            <div className="space-y-4">
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                    <p className="text-sm text-blue-800">
-                                        Se generarán el nuevo horario basados en la plantilla existente para el rango de fechas seleccionado.
-                                    </p>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Fecha Inicio
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={generateData.startDate}
-                                        onChange={(e) => setGenerateData({ ...generateData, startDate: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                        required
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Fecha Fin
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={generateData.endDate}
-                                        onChange={(e) => setGenerateData({ ...generateData, endDate: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                        required
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex gap-3 mt-6">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowGenerateModal(false)}
-                                    className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                                >
-                                    Generar
+                                    {editingTemplate ? 'Guardar' : 'Crear'}
                                 </button>
                             </div>
                         </form>

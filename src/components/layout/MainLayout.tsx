@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, DollarSign, Menu, LogOut, CreditCard, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, DollarSign, Menu, LogOut, CreditCard, Settings, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { SeasonSelector } from '../season/SeasonSelector';
 // import { auth } from '../../lib/firebase';
@@ -33,6 +33,7 @@ export default function MainLayout() {
         { to: '/admin/categorias', icon: Users, label: 'Categorías' },
         { to: '/admin/paquetes', icon: DollarSign, label: 'Paquetes' },
         { to: '/admin/plantillas', icon: Settings, label: 'Plantilla de Horario' },
+        { to: '/admin/pagos', icon: Wallet, label: 'Métodos de Pago' },
     ];
 
     const filteredNavItems = navItems.filter(item =>
