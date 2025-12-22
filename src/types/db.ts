@@ -1,5 +1,11 @@
 export type Role = 'ADMIN' | 'ASSISTANT';
-export type PaymentMethod = 'YAPE' | 'CASH';
+export type PaymentMethod = string; // Dynamic IDs like 'CASH', 'YAPE', 'TRANS_BCP'
+export interface PaymentMethodConfig {
+    id: string;
+    name: string;
+    isActive: boolean;
+    createdAt: number;
+}
 export type PaymentType = 'FULL' | 'PARTIAL';
 export type DebtStatus = 'PENDING' | 'PAID' | 'CANCELLED';
 export type StudentCategory = 'Aquabebe' | '4 a 6' | '7 a 10' | '11 a 15' | '16 a más' | 'Adultos';
@@ -138,14 +144,15 @@ export interface Student {
     fixedSchedule: Array<{ dayId: string; timeId: string }>; // Array of slots ID: "LUN_07-08" or object
     category?: StudentCategory; // Legacy field (optional for migration)
     categoryId: string; // Reference to Category (new system - required)
-    currentPackageId?: string; // Reference to current Package
-    packageStartDate?: string; // YYYY-MM-DD - when package started
-    packageEndDate?: string; // YYYY-MM-DD - when package ends
+    seasonId?: string; // Reference to the Season the student belongs to
+    currentPackageId?: string | null; // Reference to current Package
+    packageStartDate?: string | null; // YYYY-MM-DD - when package started
+    packageEndDate?: string | null; // YYYY-MM-DD - when package ends
     packageHistory?: PackageHistory[]; // History of packages
     email?: string; // Optional context
     createdAt: number; // Timestamp
-    birthDate?: string; // YYYY-MM-DD (optional)
-    age?: number; // Manual age override
+    birthDate?: string | null; // YYYY-MM-DD (optional)
+    age?: number | null; // Manual age override
 }
 
 export interface AppUser {

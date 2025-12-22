@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign, Trash2 } from 'lucide-react';
 import { scheduleService } from '../services/schedule';
+import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { dateUtils } from '../utils/date';
 import { studentService } from '../services/students';
-import type { DailySlot, Student } from '../types/db';
+import { useSeason } from '../contexts/SeasonContext';
+import type { DailySlot, Student, DayType } from '../types/db';
 
 export default function Schedule() {
+    const { currentSeason } = useSeason();
     const [currentDate, setCurrentDate] = useState(new Date());
     const [slots, setSlots] = useState<DailySlot[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
@@ -35,21 +38,94 @@ export default function Schedule() {
 
     useEffect(() => {
         loadData();
-    }, [currentDate]);
+    }, [currentDate, currentSeason]);
+
+    // Map day types to actual days of week
+    const dayTypeMap: Record<DayType, number[]> = {
+        'lun-mier-vier': [1, 3, 5], // Monday, Wednesday, Friday
+        'mar-juev': [2, 4], // Tuesday, Thursday
+        'sab-dom': [6, 0] // Saturday, Sunday
+    };
 
     const loadData = async () => {
+        if (!currentSeason) return;
+
         setLoading(true);
         try {
             const startStr = dateUtils.formatDateId(weekDays[0]);
             const endStr = dateUtils.formatDateId(weekDays[6]);
 
-            // Parallel fetch
-            const [slotsData, studentsData] = await Promise.all([
+            // Parallel fetch: existing slots, students, and templates
+            const [existingSlotsData, studentsData, templates] = await Promise.all([
                 scheduleService.getRangeSlots(startStr, endStr),
-                studentService.getAllActive()
+                studentService.getAllActive(),
+                scheduleTemplateService.getBySeason(currentSeason.id)
             ]);
 
-            setSlots(slotsData);
+            // Generate virtual slots from templates for each day in the week
+            const generatedSlots: DailySlot[] = [];
+
+            const dayNamesShort = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
+
+            weekDays.forEach(day => {
+                const dayOfWeek = day.getDay();
+                const dateStr = dateUtils.formatDateId(day);
+                const dayName = dayNamesShort[dayOfWeek];
+
+                // Find templates that apply to this day
+                const applicableTemplates = templates.filter(template =>
+                    dayTypeMap[template.dayType].includes(dayOfWeek)
+                );
+
+                applicableTemplates.forEach(template => {
+                    const slotId = `${dateStr}_${template.timeSlot.replace(':', '-')}`;
+
+                    // Find students with this specific day/time in their fixed schedule
+                    const fixedEnrollments = studentsData.filter(s =>
+                        s.fixedSchedule?.some(fs => fs.dayId === dayName && fs.timeId === template.timeSlot)
+                    ).map(s => s.id);
+
+                    // Check if this slot already exists in the database
+                    const existingSlot = existingSlotsData.find(s => s.id === slotId);
+
+                    if (existingSlot) {
+                        // MERGE attendees: Database attendees (manual bookings) + Fixed Enrollments
+                        // Use a Set to ensure uniqueness
+                        const allAttendeeIds = Array.from(new Set([
+                            ...(existingSlot.attendeeIds || []),
+                            ...fixedEnrollments
+                        ])).filter(id => studentsData.some(s => s.id === id));
+
+                        generatedSlots.push({
+                            ...existingSlot,
+                            attendeeIds: allAttendeeIds,
+                            capacity: template.capacity,
+                            categoryId: template.categoryId,
+                            isBreak: template.isBreak ?? false,
+                            timeSlot: template.timeSlot,
+                            dayType: template.dayType
+                        });
+                    } else {
+                        // Create virtual slot from template with dynamic attendees
+                        generatedSlots.push({
+                            id: slotId,
+                            date: dateStr,
+                            dayType: template.dayType,
+                            scheduleTemplateId: template.id,
+                            seasonId: currentSeason.id,
+                            categoryId: template.categoryId,
+                            timeSlot: template.timeSlot,
+                            timeId: template.timeSlot.replace(':', '-'),
+                            capacity: template.capacity,
+                            attendeeIds: fixedEnrollments,
+                            locks: [],
+                            isBreak: template.isBreak ?? false
+                        });
+                    }
+                });
+            });
+
+            setSlots(generatedSlots);
             setStudents(studentsData);
         } catch (error) {
             console.error("Error loading data:", error);
