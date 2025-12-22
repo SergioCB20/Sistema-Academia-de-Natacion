@@ -118,8 +118,9 @@ export default function Schedule() {
                 applicableTemplates.forEach(template => {
                     const slotId = `${dateStr}_${template.timeSlot.replace(':', '-')}`;
 
-                    // Find students with this specific day/time in their fixed schedule
+                    // Find students with this specific day/time in their fixed schedule AND have credits
                     const fixedEnrollments = studentsData.filter(s =>
+                        s.remainingCredits > 0 &&
                         s.fixedSchedule?.some(fs => fs.dayId === dayName && fs.timeId === template.timeSlot)
                     ).map(s => s.id);
 
@@ -194,12 +195,12 @@ export default function Schedule() {
     const handleBooking = async (student: Student) => {
         if (!selectedSlot) return;
 
-        if (!confirm(`¿Confirmar reserva para ${student.fullName}? Se descontará 1 crédito.`)) return;
+        if (!confirm(`¿Confirmar reserva para ${student.fullName}? El crédito se descontará al finalizar la clase.`)) return;
 
         setBookingLoading(true);
         try {
             // Using "ADMIN_TEST" as placeholder for user ID until Auth is fully set
-            await scheduleService.confirmBooking(selectedSlot.id, student.id);
+            await scheduleService.confirmBooking(selectedSlot.id, student.id, selectedSlot);
 
             // Refresh data
             await loadData();

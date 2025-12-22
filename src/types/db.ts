@@ -118,6 +118,7 @@ export interface DailySlot {
     timeSlot?: string; // "06:00-07:00" (new system)
     capacity: number;
     attendeeIds: string[]; // Array of student IDs
+    attendeesDeducted?: string[]; // Array of student IDs who have been charged/deducted
     locks: SlotLock[];
     isBreak?: boolean; // For rest periods
     createdAt?: Date;
