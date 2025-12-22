@@ -166,6 +166,8 @@ export interface AppUser {
 export interface Payment {
     id: string;
     studentId: string;
+    studentName?: string; // Snapshot for history
+    studentDni?: string; // Snapshot for history
     amount: number;
     method: PaymentMethod;
     type: PaymentType;
@@ -177,6 +179,8 @@ export interface Payment {
 export interface Debt {
     id: string;
     studentId: string;
+    studentName?: string; // Snapshot for history
+    studentDni?: string; // Snapshot for history
     slotId: string; // The service/slot associated
     amountTotal: number;
     amountPaid: number;
@@ -185,13 +189,7 @@ export interface Debt {
     status: DebtStatus;
 }
 
-export interface AttendanceLog {
-    id: string;
-    studentId: string;
-    slotId: string; // Ref to DailySlot
-    timestamp: number;
-    checkedBy: string; // User UID
-}
+
 
 export type LogType = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
 

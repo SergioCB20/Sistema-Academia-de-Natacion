@@ -4,6 +4,8 @@ import { loggingService } from '../services/logging';
 import { SystemLog } from '../types/db';
 import { Clock, CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
 
+import { Calendar } from 'lucide-react';
+
 export default function Dashboard() {
     const [stats, setStats] = useState({
         classesToday: 0,
@@ -12,26 +14,42 @@ export default function Dashboard() {
         incomeToday: 0
     });
     const [logs, setLogs] = useState<SystemLog[]>([]);
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [loading, setLoading] = useState(true);
+    const [loadingLogs, setLoadingLogs] = useState(false);
 
     useEffect(() => {
-        const load = async () => {
+        const loadStats = async () => {
             try {
-                const [statsData, logsData] = await Promise.all([
-                    dashboardService.getStats(),
-                    loggingService.getRecentLogs(10)
-                ]);
+                const statsData = await dashboardService.getStats();
                 setStats(statsData);
-                setLogs(logsData);
             } catch (error) {
-                console.error("Error loading dashboard:", error);
+                console.error("Error loading stats:", error);
             } finally {
                 setLoading(false);
             }
         };
 
-        load();
+        loadStats();
     }, []);
+
+    useEffect(() => {
+        const loadLogs = async () => {
+            setLoadingLogs(true);
+            try {
+                // When selecting a date, we use the date filter. 
+                // Note: The previous logic was just "Recent Logs", but now we default to "Today" via selectedDate init
+                const logsData = await loggingService.getLogsByDate(selectedDate);
+                setLogs(logsData);
+            } catch (error) {
+                console.error("Error loading logs:", error);
+            } finally {
+                setLoadingLogs(false);
+            }
+        };
+
+        loadLogs();
+    }, [selectedDate]);
 
     const getLogIcon = (type: string) => {
         switch (type) {
@@ -61,13 +79,32 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-                    <Clock className="w-5 h-5 text-slate-400" />
-                    <h3 className="font-bold text-slate-800">Actividad Reciente</h3>
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <Clock className="w-5 h-5 text-slate-400" />
+                        <h3 className="font-bold text-slate-800">Actividad del Día</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-slate-400" />
+                        <input
+                            type="date"
+                            className="text-sm border-none bg-slate-50 rounded-lg text-slate-600 focus:ring-0 cursor-pointer"
+                            value={selectedDate.toISOString().split('T')[0]}
+                            onChange={(e) => {
+                                if (e.target.value) {
+                                    // Store date as local date to avoid timezone issues when querying
+                                    const [y, m, d] = e.target.value.split('-').map(Number);
+                                    setSelectedDate(new Date(y, m - 1, d));
+                                }
+                            }}
+                        />
+                    </div>
                 </div>
-                <div className="divide-y divide-slate-100">
-                    {logs.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400">No hay actividad reciente</div>
+                <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
+                    {loadingLogs ? (
+                        <div className="p-8 text-center text-slate-400">Cargando actividad...</div>
+                    ) : logs.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400">No hay actividad para este día</div>
                     ) : (
                         logs.map(log => (
                             <div key={log.id} className="p-4 flex items-start gap-4 hover:bg-slate-50 transition-colors">
@@ -75,7 +112,7 @@ export default function Dashboard() {
                                 <div className="flex-1">
                                     <p className="text-slate-800 font-medium text-sm">{log.text}</p>
                                     <p className="text-slate-400 text-xs mt-1">
-                                        {new Date(log.timestamp).toLocaleDateString()} - {formatTime(log.timestamp)}
+                                        {formatTime(log.timestamp)}
                                     </p>
                                 </div>
                             </div>

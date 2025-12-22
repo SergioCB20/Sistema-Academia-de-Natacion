@@ -50,6 +50,15 @@ export default function Students() {
     const [selectedDebts, setSelectedDebts] = useState<Debt[]>([]);
     const [studentForDebt, setStudentForDebt] = useState<Student | null>(null);
 
+    // RECHARGE Modal State
+    const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
+    const [studentForRecharge, setStudentForRecharge] = useState<Student | null>(null);
+    const [rechargeData, setRechargeData] = useState({
+        credits: '1',
+        amount: '',
+        newEndDate: ''
+    });
+
     // Form Data
     const [formData, setFormData] = useState({
         fullName: '',
@@ -374,6 +383,68 @@ export default function Students() {
         }
     };
 
+    // RECHARGE HANDLERS
+    const handleOpenRecharge = (student: Student) => {
+        setStudentForRecharge(student);
+        setRechargeData({
+            credits: '1',
+            amount: '',
+            newEndDate: student.packageEndDate || ''
+        });
+        setIsRechargeModalOpen(true);
+    };
+
+    const handleRechargeSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!studentForRecharge) return;
+        if (isSaving) return;
+
+        setIsSaving(true);
+        try {
+            // Default to first active method or CASH
+            const defaultMethod = availablePaymentMethods.find(m => m.isActive)?.id || 'CASH';
+
+            await studentService.addCredits(
+                studentForRecharge.id,
+                Number(rechargeData.credits),
+                Number(rechargeData.amount),
+                defaultMethod,
+                "ADMIN", // CreatedBy placeholder
+                rechargeData.newEndDate || undefined
+            );
+
+            // alert("Recarga exitosa");
+            setIsRechargeModalOpen(false);
+            loadStudents();
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Error en recarga");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Auto-calculate new end date when credits change in RECHARGE mode
+    useEffect(() => {
+        if (!isRechargeModalOpen || !studentForRecharge) return;
+
+        const credits = Number(rechargeData.credits);
+        if (credits > 0 && studentForRecharge.fixedSchedule && studentForRecharge.fixedSchedule.length > 0) {
+            const selectedDays = Array.from(new Set(studentForRecharge.fixedSchedule.map(s => s.dayId)));
+
+            const predictedEnd = packageValidationService.calculateExtensionDate(
+                studentForRecharge.packageEndDate || null,
+                credits,
+                selectedDays
+            );
+
+            setRechargeData(prev => ({
+                ...prev,
+                newEndDate: predictedEnd.toISOString().split('T')[0]
+            }));
+        }
+    }, [rechargeData.credits, studentForRecharge, isRechargeModalOpen]);
+
     // Get category from DB by ID
     const getCategoryById = (id: string): Category | undefined => {
         return categories.find(c => c.id === id);
@@ -555,7 +626,10 @@ export default function Students() {
                                         {student.remainingCredits} Clases
                                     </span>
 
-                                    <button className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                                    <button
+                                        onClick={() => handleOpenRecharge(student)}
+                                        className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                    >
                                         <CreditCard className="w-4 h-4" />
                                         Recargar
                                     </button>
@@ -1056,6 +1130,69 @@ export default function Students() {
                 </div>
             )
             }
+            {/* RECHARGE MODAL */}
+            {isRechargeModalOpen && studentForRecharge && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800">Recargar Créditos</h3>
+                            <button onClick={() => setIsRechargeModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+                        </div>
+
+                        <form onSubmit={handleRechargeSubmit} className="p-6 space-y-4">
+                            <div className="text-sm text-slate-500 mb-2">
+                                Recargando para: <span className="font-bold text-slate-700">{studentForRecharge.fullName}</span>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Créditos a Agregar</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    required
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-sky-500/50 outline-none"
+                                    value={rechargeData.credits}
+                                    onChange={e => setRechargeData({ ...rechargeData, credits: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Monto a Pagar (S/)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    required
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-sky-500/50 outline-none"
+                                    value={rechargeData.amount}
+                                    onChange={e => setRechargeData({ ...rechargeData, amount: e.target.value })}
+                                    placeholder="0.00"
+                                />
+                                <p className="text-xs text-slate-400 mt-1">Si es recuperación gratuita, ingrese 0.</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Nueva Fecha Vencimiento <span className="text-slate-300 font-normal">(Auto)</span></label>
+                                <input
+                                    type="date"
+                                    readOnly
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 focus:outline-none cursor-not-allowed"
+                                    value={rechargeData.newEndDate}
+                                />
+                                <p className="text-xs text-slate-400 mt-1">Se calcula automáticamente según los horarios del alumno.</p>
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={isSaving}
+                                className="w-full bg-sky-600 text-white font-bold py-3 rounded-xl hover:bg-sky-700 transition-colors disabled:opacity-50 mt-4"
+                            >
+                                {isSaving ? 'Procesando...' : 'Confirmar Recarga'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

@@ -12,7 +12,7 @@ import {
     Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { loggingService } from './logging';
+// import { loggingService } from './logging';
 import type { Package } from '../types/db';
 
 const PACKAGES_COLLECTION = 'packages';
@@ -113,10 +113,12 @@ export const packageService = {
 
         await setDoc(docRef, newPackage);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Nuevo paquete creado: ${data.name} - S/ ${data.price}`,
             'SUCCESS'
         );
+        */
 
         return docRef.id;
     },
@@ -132,10 +134,12 @@ export const packageService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Paquete actualizado: ${id}`,
             'INFO'
         );
+        */
     },
 
     /**
@@ -149,10 +153,12 @@ export const packageService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Paquete desactivado: ${id}`,
             'WARNING'
         );
+        */
     },
 
     /**
@@ -162,10 +168,12 @@ export const packageService = {
         const docRef = doc(db, PACKAGES_COLLECTION, id);
         await deleteDoc(docRef);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Paquete eliminado permanentemente: ${id}`,
             'ERROR'
         );
+        */
     },
 
     /**
@@ -190,10 +198,12 @@ export const packageService = {
 
         const newId = await this.create(newPackageData);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Paquete duplicado para nueva temporada: ${originalPackage.name}`,
             'INFO'
         );
+        */
 
         return newId;
     },

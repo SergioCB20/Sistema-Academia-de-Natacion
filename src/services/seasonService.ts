@@ -9,13 +9,37 @@ import {
     query,
     where,
     orderBy,
-    Timestamp
+    Timestamp,
+    writeBatch,
+    limit
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { loggingService } from './logging';
+// import { loggingService } from './logging';
 import type { Season } from '../types/db';
 
 const SEASONS_COLLECTION = 'seasons';
+
+/**
+ * Helper to delete documents in batches (Firestore limit 500)
+ */
+async function deleteCollectionBySeason(collectionName: string, seasonId: string) {
+    while (true) {
+        const q = query(
+            collection(db, collectionName),
+            where('seasonId', '==', seasonId),
+            limit(500)
+        );
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) break;
+
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+    }
+}
 
 export const seasonService = {
     /**
@@ -105,10 +129,12 @@ export const seasonService = {
 
         await setDoc(docRef, newSeason);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Nueva temporada creada: ${data.name}`,
             'SUCCESS'
         );
+        */
 
         return docRef.id;
     },
@@ -134,23 +160,34 @@ export const seasonService = {
 
         await updateDoc(docRef, updateData);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Temporada actualizada: ${id}`,
             'INFO'
         );
+        */
     },
 
     /**
-     * Delete a season
+     * Delete a season and all related data (CASCADING DELETE)
      */
     async delete(id: string): Promise<void> {
+        // 1. Delete Daily Slots (Schedule)
+        await deleteCollectionBySeason('daily_slots', id);
+
+        // 2. Delete Students
+        await deleteCollectionBySeason('students', id);
+
+        // 3. Delete the Season itself
         const docRef = doc(db, SEASONS_COLLECTION, id);
         await deleteDoc(docRef);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Temporada eliminada: ${id}`,
             'WARNING'
         );
+        */
     },
 
     /**
@@ -177,10 +214,12 @@ export const seasonService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Temporada activada: ${id}`,
             'SUCCESS'
         );
+        */
     },
 
     /**

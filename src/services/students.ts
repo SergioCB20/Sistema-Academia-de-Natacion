@@ -76,6 +76,8 @@ export const studentService = {
                 const newPayment: Payment = {
                     id: paymentRef.id,
                     studentId: studentData.id, // Use id instead of dni
+                    studentName: studentData.fullName,
+                    studentDni: studentData.dni || studentData.id,
                     amount: amountPaid,
                     credits: credits,
                     method: method,
@@ -90,6 +92,8 @@ export const studentService = {
                     const newDebt: Debt = {
                         id: debtRef.id,
                         studentId: studentData.id, // Use id instead of dni
+                        studentName: studentData.fullName,
+                        studentDni: studentData.dni || studentData.id,
                         slotId: 'MATRICULA_INICIAL',
                         amountTotal: totalCost,
                         amountPaid: amountPaid,
@@ -161,6 +165,21 @@ export const studentService = {
     },
 
     /**
+     * Get all active students
+     */
+    async getAllActive(): Promise<Student[]> {
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('active', '==', true),
+            orderBy('fullName'),
+            limit(500)
+        );
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => doc.data() as Student);
+    },
+
+    /**
      * Adds credits to a student via a Payment transaction.
      * Updates 'students' (remainingCredits) and creates 'payments' log atomically.
      */
@@ -169,7 +188,8 @@ export const studentService = {
         credits: number,
         amount: number,
         method: PaymentMethod,
-        createdBy: string
+        createdBy: string,
+        newEndDate?: string // YYYY-MM-DD
     ): Promise<string> {
         const paymentRef = doc(collection(db, PAYMENTS_COLLECTION));
         const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
@@ -180,12 +200,15 @@ export const studentService = {
                 throw new Error("Estudiante no encontrado");
             }
 
-            const currentCredits = studentDoc.data().remainingCredits || 0;
+            const data = studentDoc.data();
+            const currentCredits = data.remainingCredits || 0;
 
             // Create Payment Log
             const newPayment: Payment = {
                 id: paymentRef.id,
                 studentId,
+                studentName: data.fullName,
+                studentDni: data.dni,
                 amount,
                 credits,
                 method,
@@ -196,19 +219,27 @@ export const studentService = {
 
             transaction.set(paymentRef, newPayment);
 
-            // Update Student Balance
-            transaction.update(studentRef, {
+            // Update Student Balance & End Date
+            const updates: any = {
                 remainingCredits: currentCredits + credits
-            });
+            };
+
+            if (newEndDate) {
+                updates.packageEndDate = newEndDate;
+            }
+
+            transaction.update(studentRef, updates);
         });
 
         // We can't easily get the student name inside transaction return without reading, 
         // but we can just use ID or Fetch.
         // For optimization let's just log ID or simple message.
+        /* REMOVED LOG: Alumno adquiriendo clases - requested by user to save space
         await loggingService.addLog(
             `Alumno ${studentId} adquirió ${credits} clases (S/ ${amount})`,
             'SUCCESS'
         );
+        */
 
         return paymentRef.id;
     },
@@ -347,9 +378,17 @@ export const studentService = {
                 status: newStatus
             });
 
+            // Fetch student for snapshot
+            const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+            const studentDoc = await transaction.get(studentRef);
+            const studentName = studentDoc.exists() ? studentDoc.data().fullName : 'Unknown';
+            const studentDni = studentDoc.exists() ? studentDoc.data().dni : '';
+
             const newPayment: Payment = {
                 id: paymentRef.id,
                 studentId: debt.studentId,
+                studentName: studentName,
+                studentDni: studentDni,
                 amount: amount,
                 method: method,
                 type: newStatus === 'PAID' ? 'FULL' : 'PARTIAL',
@@ -365,10 +404,12 @@ export const studentService = {
             await this.updateDebtStatus(studentId);
         }
 
+        /* REMOVED LOG: Debt Payment - requested by user to save space
         await loggingService.addLog(
             `Alumno ${studentId} pagó deuda de S/ ${amount}`,
             'SUCCESS'
         );
+        */
     },
 
     async updateDebtStatus(studentId: string): Promise<void> {
