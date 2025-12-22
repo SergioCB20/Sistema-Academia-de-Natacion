@@ -13,7 +13,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { loggingService } from './logging';
+// import { loggingService } from './logging';
 import type { ScheduleTemplate, DayType } from '../types/db';
 
 const TEMPLATES_COLLECTION = 'schedule_templates';
@@ -107,10 +107,12 @@ export const scheduleTemplateService = {
 
         await setDoc(docRef, newTemplate);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Nueva plantilla de horario creada: ${data.timeSlot} - ${data.dayType}`,
             'SUCCESS'
         );
+        */
 
         return docRef.id;
     },
@@ -135,10 +137,12 @@ export const scheduleTemplateService = {
 
         await batch.commit();
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `${templates.length} plantillas de horario creadas`,
             'SUCCESS'
         );
+        */
 
         return ids;
     },
@@ -154,10 +158,12 @@ export const scheduleTemplateService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Plantilla de horario actualizada: ${id}`,
             'INFO'
         );
+        */
     },
 
     /**
@@ -167,10 +173,12 @@ export const scheduleTemplateService = {
         const docRef = doc(db, TEMPLATES_COLLECTION, id);
         await deleteDoc(docRef);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Plantilla de horario eliminada: ${id}`,
             'WARNING'
         );
+        */
     },
 
     /**
@@ -190,10 +198,12 @@ export const scheduleTemplateService = {
 
         await this.createBulk(newTemplates);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `${newTemplates.length} plantillas duplicadas a nueva temporada`,
             'SUCCESS'
         );
+        */
 
         return newTemplates.length;
     },
@@ -236,10 +246,12 @@ export const scheduleTemplateService = {
             });
             await deleteBatch.commit();
 
+            /* REMOVED LOG
             await loggingService.addLog(
                 `${existingSnapshot.size} slots existentes eliminados antes de regenerar`,
                 'INFO'
             );
+            */
         }
 
         // STEP 2: Create new slots
@@ -300,10 +312,12 @@ export const scheduleTemplateService = {
 
         await batch.commit();
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `${slotsCreated} slots diarios generados desde plantillas (${startDateStr} a ${endDateStr})`,
             'SUCCESS'
         );
+        */
 
         return slotsCreated;
     },

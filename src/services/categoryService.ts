@@ -12,7 +12,7 @@ import {
     Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { loggingService } from './logging';
+// import { loggingService } from './logging';
 import type { Category } from '../types/db';
 
 const CATEGORIES_COLLECTION = 'categories';
@@ -86,10 +86,12 @@ export const categoryService = {
 
         await setDoc(docRef, newCategory);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Nueva categoría creada: ${data.name}`,
             'SUCCESS'
         );
+        */
 
         return docRef.id;
     },
@@ -105,10 +107,12 @@ export const categoryService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Categoría actualizada: ${id}`,
             'INFO'
         );
+        */
     },
 
     /**
@@ -122,10 +126,12 @@ export const categoryService = {
             updatedAt: Timestamp.now()
         });
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Categoría desactivada: ${id}`,
             'WARNING'
         );
+        */
     },
 
     /**
@@ -135,10 +141,12 @@ export const categoryService = {
         const docRef = doc(db, CATEGORIES_COLLECTION, id);
         await deleteDoc(docRef);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Categoría eliminada permanentemente: ${id}`,
             'ERROR'
         );
+        */
     },
 
     /**
@@ -155,10 +163,12 @@ export const categoryService = {
 
         await Promise.all(batch);
 
+        /* REMOVED LOG
         await loggingService.addLog(
             `Categorías reordenadas`,
             'INFO'
         );
+        */
     },
 
     /**

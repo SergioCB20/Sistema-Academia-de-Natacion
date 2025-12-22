@@ -7,11 +7,11 @@ import {
     runTransaction
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { DailySlot, AttendanceLog } from '../types/db';
+import type { DailySlot } from '../types/db';
 
 const DAILY_SLOTS_COLLECTION = 'daily_slots';
 const STUDENTS_COLLECTION = 'students';
-const ATTENDANCE_COLLECTION = 'attendances';
+
 
 export const scheduleService = {
     /**
@@ -79,10 +79,9 @@ export const scheduleService = {
      * Confirms a pre-booked slot.
      * Deducts credit and moves from Lock to Attendees.
      */
-    async confirmBooking(slotId: string, studentId: string, userId: string): Promise<void> {
+    async confirmBooking(slotId: string, studentId: string): Promise<void> {
         const slotRef = doc(db, DAILY_SLOTS_COLLECTION, slotId);
         const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
-        const logRef = doc(collection(db, ATTENDANCE_COLLECTION));
 
         await runTransaction(db, async (transaction) => {
             const slotDoc = await transaction.get(slotRef);
@@ -132,7 +131,7 @@ export const scheduleService = {
                 remainingCredits: student.remainingCredits - 1
             });
 
-            // 5. Log Attendance
+            /* REMOVED LOG
             const log: AttendanceLog = {
                 id: logRef.id,
                 studentId,
@@ -141,6 +140,7 @@ export const scheduleService = {
                 checkedBy: userId
             };
             transaction.set(logRef, log);
+            */
         });
     },
 

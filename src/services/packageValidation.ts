@@ -206,5 +206,43 @@ export const packageValidationService = {
             console.error('Error validating package selection:', error);
             return { valid: false, error: 'Error al validar paquete' };
         }
+    },
+
+    /**
+     * Calculate new end date when extending a package with additional credits
+     */
+    calculateExtensionDate(
+        currentEndDate: string | null, // YYYY-MM-DD
+        creditsToAdd: number,
+        selectedDays: string[] // ['LUN', 'MIE', 'VIE']
+    ): Date {
+        if (creditsToAdd <= 0 || selectedDays.length === 0) {
+            return currentEndDate ? new Date(currentEndDate) : new Date();
+        }
+
+        const today = new Date();
+        // Normalize today to start of day
+        today.setHours(0, 0, 0, 0);
+
+        let startDate: Date;
+
+        if (currentEndDate) {
+            // Add T12:00:00 to avoid timezone issues when parsing YYYY-MM-DD
+            const currentEnd = new Date(currentEndDate + 'T12:00:00');
+
+            // If current end date is in the future, we start calculating AFTER that date
+            if (currentEnd >= today) {
+                startDate = new Date(currentEnd);
+                startDate.setDate(startDate.getDate() + 1); // Start counting from the day AFTER expiry
+            } else {
+                // If expired, we start from today
+                startDate = today;
+            }
+        } else {
+            // No previous end date, start from today
+            startDate = today;
+        }
+
+        return this.calculatePreciseEndDate(startDate, creditsToAdd, selectedDays);
     }
 };

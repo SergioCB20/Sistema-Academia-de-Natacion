@@ -9,7 +9,45 @@ import type { DailySlot, Student, DayType } from '../types/db';
 
 export default function Schedule() {
     const { currentSeason } = useSeason();
-    const [currentDate, setCurrentDate] = useState(new Date());
+
+    // Helper to get initial date based on season
+    const getInitialDate = () => {
+        const today = new Date();
+        if (currentSeason) {
+            const seasonStart = new Date(currentSeason.startDate);
+            // Reset hours to compare dates only
+            today.setHours(0, 0, 0, 0);
+            seasonStart.setHours(0, 0, 0, 0);
+
+            if (today < seasonStart) {
+                return new Date(currentSeason.startDate);
+            }
+        }
+        return today;
+    };
+
+    const [currentDate, setCurrentDate] = useState(getInitialDate());
+
+    // Effect to update date when season changes (if needed)
+    useEffect(() => {
+        if (currentSeason) {
+            const today = new Date();
+            const seasonStart = new Date(currentSeason.startDate);
+            today.setHours(0, 0, 0, 0);
+            seasonStart.setHours(0, 0, 0, 0);
+
+            if (today < seasonStart) {
+                setCurrentDate(new Date(currentSeason.startDate));
+            } else {
+                // Optional: Reset to today if switch back to a current season?
+                // For now, let's just respect the "if before season, jump to start" rule.
+                // If we are IN the season, likely we want to stay where we were or go to today.
+                // Let's default to Today if inside season for better UX when switching seasons.
+                setCurrentDate(today);
+            }
+        }
+    }, [currentSeason?.id]);
+
     const [slots, setSlots] = useState<DailySlot[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
@@ -161,7 +199,7 @@ export default function Schedule() {
         setBookingLoading(true);
         try {
             // Using "ADMIN_TEST" as placeholder for user ID until Auth is fully set
-            await scheduleService.confirmBooking(selectedSlot.id, student.id, "ADMIN_TEST");
+            await scheduleService.confirmBooking(selectedSlot.id, student.id);
 
             // Refresh data
             await loadData();
