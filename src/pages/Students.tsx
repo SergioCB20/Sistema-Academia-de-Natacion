@@ -70,16 +70,24 @@ export default function Students() {
         amountPaid: '',
         totalCost: '0.00',
         credits: '12',
-        methodId: '' // Use ID instead of hardcoded type
+        methodId: '', // Use ID instead of hardcoded type
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: ''
     });
     const [availablePaymentMethods, setAvailablePaymentMethods] = useState<PaymentMethodConfig[]>([]);
 
     useEffect(() => {
-        loadStudents();
         loadCategories();
         loadActiveSeason();
         loadPaymentMethods();
     }, []);
+
+    // Load students when Active Season is ready
+    useEffect(() => {
+        if (activeSeason) {
+            loadStudents();
+        }
+    }, [activeSeason]);
 
     // Load templates when category changes and we're on step 2
     useEffect(() => {
@@ -95,10 +103,32 @@ export default function Students() {
         }
     }, [activeSeason, formData.categoryId]);
 
+    // Auto-calculate Package End Date
+    useEffect(() => {
+        if (paymentData.startDate && Number(paymentData.credits) > 0 && fixedSchedule.length > 0) {
+            const start = new Date(paymentData.startDate);
+            const selectedDays = Array.from(new Set(fixedSchedule.map(s => s.dayId))); // ['LUN', 'MIE', 'VIE']
+
+            const calculatedEnd = packageValidationService.calculatePreciseEndDate(
+                start,
+                Number(paymentData.credits),
+                selectedDays
+            );
+
+            setPaymentData(prev => ({
+                ...prev,
+                endDate: calculatedEnd.toISOString().split('T')[0]
+            }));
+        } else {
+            setPaymentData(prev => ({ ...prev, endDate: '' }));
+        }
+    }, [paymentData.startDate, paymentData.credits, fixedSchedule]);
+
     const loadStudents = async () => {
+        if (!activeSeason) return; // Wait for season to load
         setLoading(true);
         try {
-            const data = await studentService.getAllActive();
+            const data = await studentService.getBySeason(activeSeason.id);
             setStudents(data);
         } catch (error) {
             console.error("Error loading students:", error);
@@ -192,7 +222,9 @@ export default function Students() {
             amountPaid: '',
             totalCost: '0.00',
             credits: '0',
-            methodId: '' // The useEffect will pick the first one from availablePaymentMethods
+            methodId: '', // The useEffect will pick the first one from availablePaymentMethods
+            startDate: new Date().toISOString().split('T')[0],
+            endDate: ''
         });
         setStep(1);
         setSelectedPackage(null);
@@ -267,28 +299,8 @@ export default function Students() {
                 const newStudentDni = formData.dni || `TEMP_${Date.now()}`;
 
                 // Calculate package dates if package is selected or credits are added
-                let packageStartDate: string | undefined;
-                let packageEndDate: string | undefined;
-
-                if (Number(paymentData.credits) > 0 && fixedSchedule.length > 0) {
-                    const startDate = new Date();
-                    packageStartDate = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
-
-                    const sessionsPerWeek = fixedSchedule.length;
-
-                    // Create a temporary package object for calculation
-                    const tempPkg: Partial<Package> = {
-                        classesPerMonth: Number(paymentData.credits),
-                        duration: 1
-                    };
-
-                    const endDate = packageValidationService.calculatePackageEndDate(
-                        startDate,
-                        tempPkg as Package,
-                        sessionsPerWeek
-                    );
-                    packageEndDate = endDate.toISOString().split('T')[0]; // YYYY-MM-DD
-                }
+                let packageStartDate: string | undefined = paymentData.startDate || undefined;
+                let packageEndDate: string | undefined = paymentData.endDate || undefined;
 
                 await studentService.create({
                     id: newStudentDni,
@@ -296,6 +308,7 @@ export default function Students() {
                     birthDate: formData.birthDate,
                     age: formData.age ? Number(formData.age) : null,
                     categoryId: formData.categoryId,
+                    seasonId: activeSeason?.id, // Link to current season
                     fixedSchedule: fixedSchedule,
                     currentPackageId: selectedPackage?.id || null,
                     packageStartDate: packageStartDate || null,
@@ -368,6 +381,18 @@ export default function Students() {
 
     // Auto-calculate category from age using DB categories
     const getCategoryIdFromAge = (age: number): string => {
+        // Find Adulto for 18+
+        if (age >= 18) {
+            const adultCat = categories.find(c => c.name.toLowerCase().includes('adult') || (age >= c.ageRange.min && age <= c.ageRange.max && c.name.toLowerCase().includes('adult')));
+            if (adultCat) return adultCat.id;
+        }
+
+        // Find 12-18 for ages 12-17
+        if (age >= 12 && age <= 17) {
+            const teenCat = categories.find(c => c.name.includes('12') && c.name.includes('18'));
+            if (teenCat) return teenCat.id;
+        }
+
         const category = categories.find(c => age >= c.ageRange.min && age <= c.ageRange.max);
         return category?.id || '';
     };
@@ -377,6 +402,8 @@ export default function Students() {
         const age = parseInt(ageValue);
         const newCategoryId = !isNaN(age) && age >= 1 ? getCategoryIdFromAge(age) : '';
         setFormData({ ...formData, age: ageValue, categoryId: newCategoryId });
+        // Clear schedule when category/age changes to prevent accumulation
+        setFixedSchedule([]);
     };
 
     const handleNextStep = () => {
@@ -407,31 +434,14 @@ export default function Students() {
                 }
             }
 
-            // AUTO-CALCULATE PACKAGE FOR STEP 3
-            const sessionsPerWeek = fixedSchedule.length;
-            const monthlyCredits = sessionsPerWeek * 4;
-
-            // Find matching package
-            const matchingPkg = availablePackages.find(p => p.classesPerMonth === monthlyCredits);
-
-            if (matchingPkg) {
-                setFormData(prev => ({ ...prev, packageId: matchingPkg.id }));
-                setSelectedPackage(matchingPkg);
-                setPaymentData(prev => ({
-                    ...prev,
-                    credits: matchingPkg.classesPerMonth.toString(),
-                    totalCost: matchingPkg.price.toString()
-                }));
-            } else {
-                // No exact match, use custom
-                setFormData(prev => ({ ...prev, packageId: 'custom' }));
-                setSelectedPackage(null);
-                setPaymentData(prev => ({
-                    ...prev,
-                    credits: monthlyCredits.toString(),
-                    totalCost: '0.00' // Manual input required
-                }));
-            }
+            // Package selection is now manual as requested
+            setFormData(prev => ({ ...prev, packageId: '' }));
+            setSelectedPackage(null);
+            setPaymentData(prev => ({
+                ...prev,
+                credits: '',
+                totalCost: '0.00'
+            }));
         }
 
         setStep(step + 1);
@@ -751,19 +761,6 @@ export default function Students() {
                                         </div>
                                     )}
 
-                                    <div className="bg-slate-900 text-white p-4 rounded-xl flex items-center justify-between shadow-xl shrink-0 mt-auto">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 bg-sky-500/20 rounded-lg flex items-center justify-center">
-                                                <Calendar className="w-5 h-5 text-sky-400" />
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] text-slate-400 uppercase font-bold">Total de Sesiones</p>
-                                                <p className="text-lg font-bold">
-                                                    {fixedSchedule.length} <span className="text-sm font-normal text-slate-400">por semana</span> • {fixedSchedule.length * 4} <span className="text-sm font-normal text-slate-400">por mes</span>
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             )}
 
@@ -815,7 +812,8 @@ export default function Students() {
                                                         <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                                         <input
                                                             type="number"
-                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold"
+                                                            readOnly={formData.packageId !== 'custom'}
+                                                            className={`w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold ${formData.packageId !== 'custom' ? 'bg-slate-50 cursor-not-allowed text-slate-500' : ''}`}
                                                             value={paymentData.credits}
                                                             placeholder="0"
                                                             onChange={e => setPaymentData({ ...paymentData, credits: e.target.value })}
@@ -828,10 +826,39 @@ export default function Students() {
                                                         <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">S/</span>
                                                         <input
                                                             type="number"
-                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-sky-600"
+                                                            readOnly={formData.packageId !== 'custom'}
+                                                            className={`w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold ${formData.packageId !== 'custom' ? 'bg-slate-50 cursor-not-allowed text-slate-500' : 'text-sky-600'}`}
                                                             value={paymentData.totalCost}
                                                             placeholder="0.00"
                                                             onChange={e => setPaymentData({ ...paymentData, totalCost: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Fecha Inicio</label>
+                                                    <div className="relative">
+                                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="date"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold"
+                                                            value={paymentData.startDate}
+                                                            onChange={e => setPaymentData({ ...paymentData, startDate: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Fecha Fin</label>
+                                                    <div className="relative">
+                                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="date"
+                                                            readOnly
+                                                            disabled
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed font-bold"
+                                                            value={paymentData.endDate}
                                                         />
                                                     </div>
                                                 </div>

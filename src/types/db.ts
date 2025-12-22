@@ -144,6 +144,7 @@ export interface Student {
     fixedSchedule: Array<{ dayId: string; timeId: string }>; // Array of slots ID: "LUN_07-08" or object
     category?: StudentCategory; // Legacy field (optional for migration)
     categoryId: string; // Reference to Category (new system - required)
+    seasonId?: string; // Reference to the Season the student belongs to
     currentPackageId?: string | null; // Reference to current Package
     packageStartDate?: string | null; // YYYY-MM-DD - when package started
     packageEndDate?: string | null; // YYYY-MM-DD - when package ends

@@ -36,6 +36,52 @@ export const packageValidationService = {
     },
 
     /**
+     * Calculate the precise end date based on actual class days
+     */
+    calculatePreciseEndDate(
+        startDate: Date,
+        totalClasses: number,
+        selectedDays: string[] // ['LUN', 'MIE', 'VIE']
+    ): Date {
+        if (totalClasses <= 0 || selectedDays.length === 0) return startDate;
+
+        const dayMap: Record<string, number> = {
+            'DOM': 0, 'LUN': 1, 'MAR': 2, 'MIE': 3, 'JUE': 4, 'VIE': 5, 'SAB': 6
+        };
+
+        const targetDays = selectedDays.map(d => dayMap[d.toUpperCase()]).filter(d => d !== undefined);
+        if (targetDays.length === 0) return startDate;
+
+        let currentDate = new Date(startDate.getTime());
+        // Normalizar a medianoche para evitar problemas de zona horaria
+        currentDate.setHours(12, 0, 0, 0); // Usar mediodía para evitar saltos por zona horaria al sumar días
+
+        let classesCounted = 0;
+        let lastClassDate = new Date(currentDate.getTime());
+
+        // Buscamos las clases
+        while (classesCounted < totalClasses) {
+            const dayOfWeek = currentDate.getDay();
+            if (targetDays.includes(dayOfWeek)) {
+                classesCounted++;
+                lastClassDate = new Date(currentDate.getTime());
+            }
+
+            if (classesCounted < totalClasses) {
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            // Safety break to prevent infinite loops (max 1 year)
+            if (currentDate.getTime() > startDate.getTime() + (365 * 24 * 60 * 60 * 1000)) {
+                break;
+            }
+        }
+
+        return lastClassDate;
+    },
+
+
+    /**
      * Check if a package can be completed before the season end date
      */
     canCompleteBeforeSeasonEnd(

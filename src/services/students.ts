@@ -141,16 +141,23 @@ export const studentService = {
      * For small datasets, client-side filtering might be better if we fetch all active students.
      * Here we just fetch active ones.
      */
-    async getAllActive(): Promise<Student[]> {
+    /**
+     * Get active students filtered by season
+     * NOTE: Filtering client-side to avoid requiring a composite index active+seasonId+fullName
+     */
+    async getBySeason(seasonId: string): Promise<Student[]> {
         const q = query(
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(100)
+            limit(500)
         );
 
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as Student);
+        const allActive = snapshot.docs.map(doc => doc.data() as Student);
+
+        // Client-side filter
+        return allActive.filter(student => student.seasonId === seasonId);
     },
 
     /**
