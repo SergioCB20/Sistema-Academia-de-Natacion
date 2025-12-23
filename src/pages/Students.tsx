@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     User,
@@ -31,6 +31,7 @@ export default function Students() {
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const isSubmittingRef = useRef(false);
 
     // Dynamic Data from DB
     const [categories, setCategories] = useState<Category[]>([]);
@@ -333,7 +334,8 @@ export default function Students() {
             return;
         }
 
-        if (isSaving) return;
+        if (isSubmittingRef.current || isSaving) return;
+        isSubmittingRef.current = true;
         setIsSaving(true);
         try {
             if (editingStudent) {
@@ -386,6 +388,7 @@ export default function Students() {
             alert(error.message || "Error al guardar");
         } finally {
             setIsSaving(false);
+            isSubmittingRef.current = false;
         }
     };
 
@@ -592,6 +595,78 @@ export default function Students() {
 
     const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
 
+    // Helper: Calculate elapsed classes for a student based on schedule and start date
+    const calculateRealRemaining = (student: Student) => {
+        if (!student.packageStartDate || !student.fixedSchedule || student.fixedSchedule.length === 0) {
+            return student.remainingCredits;
+        }
+
+        try {
+            // Note: Use string parsing to avoid UTC shifts
+            const [y, m, d] = student.packageStartDate.split('-').map(Number);
+            const startDate = new Date(y, m - 1, d, 0, 0, 0); // Local start
+            const now = new Date();
+
+            if (now < startDate) return student.remainingCredits;
+
+            let elapsed = 0;
+            const dayMap: Record<string, number> = { 'DOM': 0, 'LUN': 1, 'MAR': 2, 'MIE': 3, 'JUE': 4, 'VIE': 5, 'SAB': 6 };
+
+            const tempDate = new Date(startDate);
+            // Limit loop to avoid infinite loops in weird cases (max 365 days lookahead)
+            const MAX_DAYS = 365;
+            let safety = 0;
+
+            while (tempDate <= now && safety < MAX_DAYS) {
+                // If this day matches schedule
+                const currentDayIndex = tempDate.getDay();
+                const dayCode = Object.keys(dayMap).find(key => dayMap[key] === currentDayIndex);
+
+                if (dayCode) {
+                    // Check if student has class this day
+                    const isClassDay = student.fixedSchedule.some(s => s.dayId === dayCode);
+
+                    if (isClassDay) {
+                        const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        const tempMidnight = new Date(tempDate.getFullYear(), tempDate.getMonth(), tempDate.getDate());
+
+                        // If it's strictly in the past (yesterday or before), count it
+                        if (tempMidnight < todayMidnight) {
+                            elapsed++;
+                        } else if (tempMidnight.getTime() === todayMidnight.getTime()) {
+                            // If it's TODAY, check time
+                            // Find the relevant time slots
+                            const slots = student.fixedSchedule.filter(s => s.dayId === dayCode);
+                            let slotPassed = false;
+
+                            // If multiple slots per day, 1 credit per slot (usually)
+                            slots.forEach(slot => {
+                                // Time format "HH:MM-HH:MM"
+                                const [, endStr] = slot.timeId.split('-');
+                                const [h, min] = endStr.split(':').map(Number);
+                                const classEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, min, 0);
+                                if (new Date() > classEndTime) {
+                                    slotPassed = true; // At least one slot passed
+                                }
+                            });
+
+                            if (slotPassed) elapsed++;
+                        }
+                    }
+                }
+
+                tempDate.setDate(tempDate.getDate() + 1);
+                safety++;
+            }
+
+            const realRemaining = student.remainingCredits - elapsed;
+            return realRemaining;
+        } catch (e) {
+            console.error("Error calculating remaining:", e);
+            return student.remainingCredits;
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -685,11 +760,11 @@ export default function Students() {
                                 </div>
 
                                 <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${student.remainingCredits > 0
+                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${calculateRealRemaining(student) > 0
                                         ? 'bg-emerald-100 text-emerald-700'
                                         : 'bg-slate-100 text-slate-500'
                                         }`}>
-                                        {student.remainingCredits} Clases
+                                        {calculateRealRemaining(student)} Clases
                                     </span>
 
                                     <button
