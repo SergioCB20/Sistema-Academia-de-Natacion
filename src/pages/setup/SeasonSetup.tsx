@@ -11,8 +11,8 @@ export default function SeasonSetup() {
     const [formData, setFormData] = useState({
         name: '',
         type: 'summer' as SeasonType,
-        startDate: '',
-        endDate: '',
+        startMonth: '',
+        endMonth: '',
         workingHoursStart: '06:00',
         workingHoursEnd: '21:30'
     });
@@ -27,8 +27,8 @@ export default function SeasonSetup() {
             await seasonService.create({
                 name: formData.name,
                 type: formData.type,
-                startDate: new Date(formData.startDate),
-                endDate: new Date(formData.endDate),
+                startMonth: formData.startMonth,
+                endMonth: formData.endMonth,
                 workingHours: {
                     start: formData.workingHoursStart,
                     end: formData.workingHoursEnd
@@ -67,8 +67,7 @@ export default function SeasonSetup() {
                             Paso 1: Crear Temporada
                         </h3>
                         <p className="text-sm text-blue-700">
-                            Define la temporada actual (verano o invierno) con sus fechas y horarios de trabajo.
-                            Después podrás configurar categorías, paquetes y horarios.
+                            Define la temporada actual (verano o invierno) con sus meses y horarios de trabajo. Después podrás configurar categorías, paquetes y horarios.
                         </p>
                     </div>
 
@@ -95,8 +94,8 @@ export default function SeasonSetup() {
                                 type="button"
                                 onClick={() => setFormData({ ...formData, type: 'summer' })}
                                 className={`p-4 border-2 rounded-lg transition-all ${formData.type === 'summer'
-                                        ? 'border-orange-500 bg-orange-50'
-                                        : 'border-gray-200 hover:border-orange-300'
+                                    ? 'border-orange-500 bg-orange-50'
+                                    : 'border-gray-200 hover:border-orange-300'
                                     }`}
                             >
                                 <div className="text-3xl mb-2">☀️</div>
@@ -107,8 +106,8 @@ export default function SeasonSetup() {
                                 type="button"
                                 onClick={() => setFormData({ ...formData, type: 'winter' })}
                                 className={`p-4 border-2 rounded-lg transition-all ${formData.type === 'winter'
-                                        ? 'border-blue-500 bg-blue-50'
-                                        : 'border-gray-200 hover:border-blue-300'
+                                    ? 'border-blue-500 bg-blue-50'
+                                    : 'border-gray-200 hover:border-blue-300'
                                     }`}
                             >
                                 <div className="text-3xl mb-2">❄️</div>
@@ -121,27 +120,31 @@ export default function SeasonSetup() {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Fecha de Inicio
+                                Mes de Inicio
                             </label>
                             <input
-                                type="date"
-                                value={formData.startDate}
-                                onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                                type="month"
+                                value={formData.startMonth}
+                                onChange={(e) => setFormData({ ...formData, startMonth: e.target.value })}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                placeholder="YYYY-MM"
                                 required
                             />
+                            <p className="text-xs text-gray-500 mt-1">Formato: 2026-01</p>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Fecha de Fin
+                                Mes de Fin
                             </label>
                             <input
-                                type="date"
-                                value={formData.endDate}
-                                onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                                type="month"
+                                value={formData.endMonth}
+                                onChange={(e) => setFormData({ ...formData, endMonth: e.target.value })}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                placeholder="YYYY-MM"
                                 required
                             />
+                            <p className="text-xs text-gray-500 mt-1">Formato: 2026-02</p>
                         </div>
                     </div>
 

@@ -14,13 +14,13 @@ export type DayType = 'lun-mier-vier' | 'mar-juev' | 'sab-dom';
 
 // --- GRUPO A: CONFIGURACIÓN MAESTRA ---
 
-// New Season Management System
+// New Season Management System (Monthly-based)
 export interface Season {
     id: string;
     name: string; // "Verano 2026"
     type: SeasonType;
-    startDate: Date;
-    endDate: Date;
+    startMonth: string; // "2026-01" formato YYYY-MM
+    endMonth: string;   // "2026-02" formato YYYY-MM
     workingHours: {
         start: string; // "06:00"
         end: string; // "21:30"
@@ -69,6 +69,39 @@ export interface ScheduleTemplate {
     isBreak: boolean; // For rest periods like 2:00-2:30
     createdAt: Date;
     updatedAt: Date;
+}
+
+// --- MONTHLY SCHEDULE SYSTEM ---
+
+export interface MonthlySlot {
+    id: string; // "2026-01_06:00-07:00_lun-mier-vier"
+    seasonId: string;
+    month: string; // "2026-01" formato YYYY-MM
+    scheduleTemplateId: string;
+    dayType: DayType;
+    timeSlot: string; // "06:00-07:00"
+    categoryId: string;
+    capacity: number;
+    enrolledStudents: MonthlyEnrollment[]; // Alumnos inscritos en este horario mensual
+    isBreak: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface MonthlyEnrollment {
+    studentId: string;
+    studentName: string; // Snapshot para historial
+    enrolledAt: Date; // Cuándo se inscribió
+    endsAt: Date; // Cuándo termina su paquete (packageEndDate)
+    creditsAllocated: number; // Cuántos créditos se asignaron para este mes
+    attendanceRecord?: AttendanceDay[]; // Registro de asistencia opcional
+}
+
+export interface AttendanceDay {
+    date: string; // "2026-01-15"
+    attended: boolean;
+    markedBy?: string; // UID del usuario que marcó
+    markedAt?: Date;
 }
 
 // Legacy interfaces (keep for backward compatibility if needed)

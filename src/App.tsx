@@ -6,7 +6,7 @@ import { SeasonGuard } from './components/SeasonGuard';
 import MainLayout from './components/layout/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Students from './pages/Students';
-import Schedule from './pages/Schedule';
+import MonthlySchedule from './pages/MonthlySchedule';
 import Finance from './pages/Finance';
 import IDCard from './pages/IDCard';
 import Login from './pages/Login';
@@ -41,7 +41,7 @@ function App() {
                 </ProtectedRoute>
               } />
               <Route path="alumnos" element={<Students />} />
-              <Route path="horarios" element={<Schedule />} />
+              <Route path="horarios" element={<MonthlySchedule />} />
               <Route path="caja" element={
                 <ProtectedRoute allowedRoles={['ADMIN']}>
                   <Finance />

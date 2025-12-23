@@ -8,10 +8,7 @@ import {
     where,
     orderBy,
     limit,
-    runTransaction,
-    writeBatch,
-    arrayUnion,
-    arrayRemove
+    runTransaction
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -126,16 +123,16 @@ export const studentService = {
             'SUCCESS'
         );
 
-        // Post-creation: Sync fixed schedule to existing daily slots
+
+        // Post-creation: Sync fixed schedule to existing monthly slots
         if (studentData.fixedSchedule && studentData.fixedSchedule.length > 0) {
-            // We don't await this to keep UI responsive? Or we do?
-            // Better to await to ensure consistency before UI reload.
-            try {
-                await this.syncFixedScheduleToSlots(studentData.id, studentData.fixedSchedule);
-            } catch (e) {
-                console.error("Error syncing slots:", e);
-                // Non-fatal error
-            }
+            // DO NOT CATCH - let validation errors propagate to UI
+            await this.syncFixedScheduleToMonthlySlots(
+                studentData.id,
+                studentData.fixedSchedule,
+                studentData.packageEndDate,
+                studentData.packageStartDate // Pass packageStartDate for future enrollment
+            );
         }
     },
 
@@ -145,6 +142,16 @@ export const studentService = {
      * For small datasets, client-side filtering might be better if we fetch all active students.
      * Here we just fetch active ones.
      */
+    async search(term: string): Promise<Student[]> {
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('fullName', '>=', term),
+            where('fullName', '<=', term + '\uf8ff'),
+            limit(10)
+        );
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => doc.data() as Student);
+    },
     /**
      * Get active students filtered by season
      * NOTE: Filtering client-side to avoid requiring a composite index active+seasonId+fullName
@@ -252,11 +259,21 @@ export const studentService = {
         await updateDoc(ref, data);
 
         // If fixedSchedule was updated, sync slots
+        // If fixedSchedule was updated, sync slots
         if (data.fixedSchedule) {
             try {
-                await this.syncFixedScheduleToSlots(studentId, data.fixedSchedule);
+                // DO NOT CATCH - let validation errors propagate to UI? 
+                // In update context, blocking might be annoying if data is partial. 
+                // But for schedule consistency, we SHOULD block.
+                await this.syncFixedScheduleToMonthlySlots(
+                    studentId,
+                    data.fixedSchedule,
+                    data.packageEndDate,
+                    data.packageStartDate
+                );
             } catch (e) {
                 console.error("Error syncing slots on update:", e);
+                throw e; // Propagate error so UI shows it
             }
         }
     },
@@ -278,67 +295,7 @@ export const studentService = {
         await updateDoc(ref, { active });
     },
 
-    /**
-     * Helper: Syncs a student's fixed schedule to existing daily slots in the DB.
-     * This is useful after registration or schedule change.
-     * It looks ahead 4 weeks.
-     */
-    async syncFixedScheduleToSlots(studentId: string, fixedSchedule: Array<{ dayId: string, timeId: string }>): Promise<void> {
-        // fixedSchedule now stores individual days (e.g., "LUN") in dayId field
-        // and timeSlot (e.g., "13:00-14:00") in timeId field
 
-        const batch = writeBatch(db);
-        let operations = 0;
-        const today = new Date();
-        const endDate = new Date(today);
-        endDate.setDate(today.getDate() + 28);
-
-        const q = query(
-            collection(db, 'daily_slots'),
-            where('date', '>=', today.toISOString().split('T')[0]),
-            where('date', '<=', endDate.toISOString().split('T')[0])
-        );
-
-        const snapshot = await getDocs(q);
-
-        // Create a set of schedule patterns for quick lookup
-        // Each entry is "DAYNAME_timeSlot" (e.g., "LUN_13:00-14:00")
-        const scheduleSet = new Set(
-            fixedSchedule.map(s => `${s.dayId}_${s.timeId}`)
-        );
-
-        const dayNames = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
-
-        snapshot.docs.forEach(docSnap => {
-            const data = docSnap.data();
-
-            if (data.date && data.timeSlot) {
-                // Determine day of week for this slot from its date string
-                const slotDate = new Date(data.date + 'T12:00:00');
-                const dayOfWeek = slotDate.getDay();
-                const dayName = dayNames[dayOfWeek];
-
-                const slotKey = `${dayName}_${data.timeSlot}`;
-
-                if (scheduleSet.has(slotKey)) {
-                    batch.update(docSnap.ref, {
-                        attendeeIds: arrayUnion(studentId)
-                    });
-                    operations++;
-                } else {
-                    // If student was previously in this slot but it's no longer in their fixed schedule, remove them
-                    batch.update(docSnap.ref, {
-                        attendeeIds: arrayRemove(studentId)
-                    });
-                    operations++;
-                }
-            }
-        });
-
-        if (operations > 0) {
-            await batch.commit();
-        }
-    },
 
     /**
      * Get pending debts for a student.
@@ -453,5 +410,192 @@ export const studentService = {
 
         const snap = await getDocs(q);
         return snap.size;
+    },
+
+    /**
+     * Helper: Syncs a student's fixed schedule to existing monthly slots in the DB.
+     * This enrolls the student in all monthly slots that match their schedule for the current season.
+     * Includes capacity validation and provides detailed error messages.
+     */
+    async syncFixedScheduleToMonthlySlots(
+        studentId: string,
+        fixedSchedule: Array<{ dayId: string, timeId: string }>,
+        packageEndDate?: string | null,
+        packageStartDate?: string | null
+    ): Promise<void> {
+        // Import services dynamically to avoid circular dependencies
+        const { monthlyScheduleService } = await import('./monthlyScheduleService');
+        const { seasonService } = await import('./seasonService');
+        const { formatMonthId, getMonthName } = await import('../utils/monthUtils');
+
+        // Get active season
+        const activeSeason = await seasonService.getActiveSeason();
+        if (!activeSeason) {
+            throw new Error('No hay temporada activa. Por favor, cree una temporada primero.');
+        }
+
+        // Determine which dayType this schedule belongs to
+        const dayIds = Array.from(new Set(fixedSchedule.map(s => s.dayId))).sort();
+        const timeSlots = Array.from(new Set(fixedSchedule.map(s => s.timeId)));
+
+        let dayType: 'lun-mier-vier' | 'mar-juev' | 'sab-dom' | null = null;
+
+        // Map day combinations to dayType
+        const daySet = dayIds.join(',');
+        if (daySet === 'LUN,MIE,VIE') dayType = 'lun-mier-vier';
+        else if (daySet === 'JUE,MAR') dayType = 'mar-juev';
+        else if (daySet === 'DOM,SAB') dayType = 'sab-dom';
+
+        if (!dayType) {
+            throw new Error(`No se pudo determinar el tipo de horario (${daySet}). Por favor, seleccione un horario válido.`);
+        }
+
+        // Get start month (either current month OR package start date month if future)
+        // If packageStartDate is in the past, we should probably still use current month for NEW enrollments?
+        // But if it's a specific start date, maybe we should respect it?
+        // Let's assume packageStartDate is strictly respected if provided.
+        const currentMonth = packageStartDate
+            ? formatMonthId(new Date(packageStartDate))
+            : formatMonthId(new Date());
+
+        const endMonth = packageEndDate
+            ? formatMonthId(new Date(packageEndDate))
+            : activeSeason.endMonth;
+
+        // Get all monthly slots for this season that match the student's schedule
+        const q = query(
+            collection(db, 'monthly_slots'),
+            where('seasonId', '==', activeSeason.id),
+            where('dayType', '==', dayType)
+        );
+
+        const snapshot = await getDocs(q);
+
+        // Collect matching slots and check capacity
+        const matchingSlots: Array<{
+            id: string,
+            month: string,
+            timeSlot: string,
+            capacity: number,
+            enrolled: number,
+            isFull: boolean,
+            enrolledStudents: any[]
+        }> = [];
+
+        for (const docSnap of snapshot.docs) {
+            const slot = docSnap.data();
+
+            // Check if this slot matches any of the student's time slots
+            const matchesTimeSlot = timeSlots.some(ts => ts === slot.timeSlot);
+
+            // Check if slot month is within student's package period
+            const slotMonth = slot.month;
+            const isWithinPeriod = slotMonth >= currentMonth && slotMonth <= endMonth;
+
+            if (matchesTimeSlot && isWithinPeriod) {
+                const enrolledCount = slot.enrolledStudents?.length || 0;
+                const isFull = enrolledCount >= slot.capacity;
+
+                matchingSlots.push({
+                    id: docSnap.id,
+                    month: slotMonth,
+                    timeSlot: slot.timeSlot,
+                    capacity: slot.capacity,
+                    enrolled: enrolledCount,
+                    isFull,
+                    enrolledStudents: slot.enrolledStudents || []
+                });
+            }
+        }
+
+        if (matchingSlots.length === 0) {
+            throw new Error('Fecha de inicio invalida');
+        }
+
+        // Sort by month
+        matchingSlots.sort((a, b) => a.month.localeCompare(b.month));
+
+        // Check if any slots are full at the projected start date
+        const requestedStartDate = packageStartDate
+            ? new Date(`${packageStartDate}T00:00:00`)
+            : new Date();
+
+        const fullSlots = matchingSlots.filter(s => {
+            // Smart capacity check:
+            // Count how many students will be active on the requestedStartDate
+            const enrolled = s.enrolledStudents || [];
+
+            let activeCount = 0;
+            enrolled.forEach((enrollment: any) => {
+                const endDate = enrollment.endsAt?.toDate
+                    ? enrollment.endsAt.toDate()
+                    : new Date(enrollment.endsAt);
+
+                // A student consumes a spot if their end date is ON or AFTER our start date
+                // (Assuming they free up the spot strictly after endDate)
+                if (endDate >= requestedStartDate) {
+                    activeCount++;
+                }
+            });
+
+            return activeCount >= s.capacity;
+        });
+
+        if (fullSlots.length > 0) {
+            // Find the first available slot (not full) logic (keeping existing suggestion logic but updated)
+            // ... Logic to suggest next date ...
+
+            // Re-calculate the absolute earliest availability across the full slots to guide the user
+            let globalEarliestEndDate: Date | null = null;
+
+            for (const fullSlot of fullSlots) {
+                for (const enrollment of fullSlot.enrolledStudents) {
+                    const endDate = enrollment.endsAt?.toDate ? enrollment.endsAt.toDate() : new Date(enrollment.endsAt);
+                    // We need a date that is > all overlapping blocks? No, just finding ONE opening.
+                    // Finding the min(endDate) that gives us an opening.
+                    // Actually, let's keep the error message simple or reuse existing suggestion logic
+                    // The existing logic found min(endDate) of ALL students.
+
+                    if (!globalEarliestEndDate || endDate < globalEarliestEndDate) {
+                        globalEarliestEndDate = endDate;
+                    }
+                }
+            }
+
+            const availabilityMessage = globalEarliestEndDate
+                ? `\n\nSe liberará un cupo aproximadamente el ${globalEarliestEndDate.toLocaleDateString('es-PE')}.`
+                : '';
+
+            const fullMonths = fullSlots.map(s => getMonthName(s.month)).join(', ');
+
+            throw new Error(
+                `⚠️ HORARIO LLENO (FECHA OCUPADA)\n\n` +
+                `Para la fecha de inicio seleccionada (${requestedStartDate.toLocaleDateString('es-PE')}), el horario está lleno en: ${fullMonths}.${availabilityMessage}\n\n` +
+                `La fecha seleccionada se superpone con matrículas existentes que aún no terminan.\n` +
+                `Intente con una fecha posterior a la sugerida.`
+            );
+        }
+
+        // Enroll student in all available slots
+        let enrolled = 0;
+        const errors: string[] = [];
+
+        for (const slot of matchingSlots) {
+            try {
+                await monthlyScheduleService.enrollStudent(slot.id, studentId);
+                enrolled++;
+            } catch (error: any) {
+                // Ignore if already enrolled
+                if (!error.message?.includes('ya está inscrito')) {
+                    errors.push(`${getMonthName(slot.month)}: ${error.message}`);
+                }
+            }
+        }
+
+        if (errors.length > 0 && enrolled === 0) {
+            throw new Error(`No se pudo inscribir al alumno:\n\n${errors.join('\n')}`);
+        }
+
+        console.log(`✅ Alumno ${studentId} inscrito en ${enrolled} horarios mensuales`);
     }
 };

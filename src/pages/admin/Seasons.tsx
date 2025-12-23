@@ -12,8 +12,8 @@ export default function Seasons() {
     const [formData, setFormData] = useState({
         name: '',
         type: 'summer' as SeasonType,
-        startDate: '',
-        endDate: '',
+        startMonth: '',
+        endMonth: '',
         workingHoursStart: '06:00',
         workingHoursEnd: '21:30',
         isActive: false
@@ -42,8 +42,8 @@ export default function Seasons() {
             const seasonData = {
                 name: formData.name,
                 type: formData.type,
-                startDate: new Date(formData.startDate),
-                endDate: new Date(formData.endDate),
+                startMonth: formData.startMonth,
+                endMonth: formData.endMonth,
                 workingHours: {
                     start: formData.workingHoursStart,
                     end: formData.workingHoursEnd
@@ -71,8 +71,8 @@ export default function Seasons() {
         setFormData({
             name: season.name,
             type: season.type,
-            startDate: new Date(season.startDate).toISOString().split('T')[0],
-            endDate: new Date(season.endDate).toISOString().split('T')[0],
+            startMonth: season.startMonth,
+            endMonth: season.endMonth,
             workingHoursStart: season.workingHours.start,
             workingHoursEnd: season.workingHours.end,
             isActive: season.isActive
@@ -110,8 +110,8 @@ export default function Seasons() {
         setFormData({
             name: '',
             type: 'summer',
-            startDate: '',
-            endDate: '',
+            startMonth: '',
+            endMonth: '',
             workingHoursStart: '06:00',
             workingHoursEnd: '21:30',
             isActive: false
@@ -164,13 +164,13 @@ export default function Seasons() {
                                     <div>
                                         <span className="text-gray-500">Inicio:</span>
                                         <span className="ml-2 font-medium">
-                                            {new Date(season.startDate).toLocaleDateString()}
+                                            {season.startMonth}
                                         </span>
                                     </div>
                                     <div>
                                         <span className="text-gray-500">Fin:</span>
                                         <span className="ml-2 font-medium">
-                                            {new Date(season.endDate).toLocaleDateString()}
+                                            {season.endMonth}
                                         </span>
                                     </div>
                                     <div>
@@ -248,24 +248,24 @@ export default function Seasons() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Fecha Inicio
+                                            Mes Inicio (YYYY-MM)
                                         </label>
                                         <input
-                                            type="date"
-                                            value={formData.startDate}
-                                            onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                                            type="month"
+                                            value={formData.startMonth}
+                                            onChange={(e) => setFormData({ ...formData, startMonth: e.target.value })}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                                             required
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Fecha Fin
+                                            Mes Fin (YYYY-MM)
                                         </label>
                                         <input
-                                            type="date"
-                                            value={formData.endDate}
-                                            onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                                            type="month"
+                                            value={formData.endMonth}
+                                            onChange={(e) => setFormData({ ...formData, endMonth: e.target.value })}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                                             required
                                         />

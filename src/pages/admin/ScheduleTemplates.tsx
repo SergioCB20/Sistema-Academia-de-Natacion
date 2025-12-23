@@ -114,6 +114,13 @@ export default function ScheduleTemplates() {
                     capacity: formData.capacity,
                     isBreak: formData.isBreak
                 });
+
+                // Sync capacity to existing monthly slots if capacity changed
+                if (selectedSeasonId) {
+                    const { monthlyScheduleService } = await import('../../services/monthlyScheduleService');
+                    await monthlyScheduleService.syncCapacityFromTemplates(selectedSeasonId);
+                }
+
                 await loadTemplates();
                 handleCloseModal();
                 return;
@@ -232,28 +239,24 @@ export default function ScheduleTemplates() {
             return;
         }
 
-        const confirmMsg = `¿Sincronizar horarios para "${selectedSeason.name}"?\n\nEsto regenerará todos los slots diarios desde ${new Date(selectedSeason.startDate).toLocaleDateString()} hasta ${new Date(selectedSeason.endDate).toLocaleDateString()} basándose en la plantilla actual.`;
+        const confirmMsg = `¿Sincronizar horarios para "${selectedSeason.name}"?\n\nEsto generará horarios mensuales desde ${selectedSeason.startMonth} hasta ${selectedSeason.endMonth} basándose en la plantilla actual.`;
 
         if (!confirm(confirmMsg)) return;
 
         setIsSyncing(true);
         try {
-            // Format dates as YYYY-MM-DD
-            const formatDate = (date: Date) => {
-                const d = new Date(date);
-                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            };
+            const { monthlyScheduleService } = await import('../../services/monthlyScheduleService');
 
-            const startDate = formatDate(selectedSeason.startDate);
-            const endDate = formatDate(selectedSeason.endDate);
-
-            const slotsCreated = await scheduleTemplateService.generateDailySlots(
+            const slotsCreated = await monthlyScheduleService.generateMonthlySlots(
                 selectedSeasonId,
-                startDate,
-                endDate
+                selectedSeason.startMonth,
+                selectedSeason.endMonth
             );
 
-            alert(`✅ Sincronización completada!\n\nSe generaron ${slotsCreated} slots diarios para "${selectedSeason.name}".`);
+            // Sync capacity from templates to ensure all slots have correct capacity
+            await monthlyScheduleService.syncCapacityFromTemplates(selectedSeasonId);
+
+            alert(`✅ Sincronización completada!\n\nSe generaron ${slotsCreated} horarios mensuales para "${selectedSeason.name}".\n\nCapacidades actualizadas desde las plantillas.`);
         } catch (error) {
             console.error('Error syncing schedules:', error);
             alert('Error al sincronizar horarios');
