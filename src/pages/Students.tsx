@@ -23,6 +23,7 @@ import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { paymentMethodService } from '../services/paymentMethodService';
 import { seasonService } from '../services/seasonService';
 import { packageValidationService } from '../services/packageValidation';
+import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplate, PaymentMethodConfig } from '../types/db';
 
 export default function Students() {
@@ -38,6 +39,17 @@ export default function Students() {
     const [loadingTemplates, setLoadingTemplates] = useState(false);
     const [activeSeason, setActiveSeason] = useState<Season | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Capacity Data
+    const [capacityInfo, setCapacityInfo] = useState<Record<string, {
+        totalCapacity: number;
+        currentEnrollment: number;
+        available: number;
+        isFull: boolean;
+        earliestAvailableDate: Date | null;
+    }>>({});
+    const [loadingCapacity, setLoadingCapacity] = useState(false);
+    const [minPackageStartDate, setMinPackageStartDate] = useState<string | null>(null);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -69,7 +81,8 @@ export default function Students() {
         age: '',
         categoryId: '',
         packageId: '',
-        paymentMethodId: '' // Track the selected payment method ID
+        paymentMethodId: '',
+        packageStartDate: '' // Optional future start date
     });
 
     const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
@@ -214,10 +227,30 @@ export default function Students() {
             const allTemplates = await scheduleTemplateService.getBySeason(activeSeason.id);
             // Load ALL templates to build the global grid
             setTemplates(allTemplates);
+
+            // Fetch capacity info for all templates
+            setLoadingCapacity(true);
+            const capacityPromises = allTemplates.map(async (template) => {
+                const info = await monthlyScheduleService.getScheduleCapacityInfo(
+                    activeSeason.id,
+                    template.dayType,
+                    template.timeSlot
+                );
+                return { key: `${template.dayType}-${template.timeSlot}`, info };
+            });
+
+            const results = await Promise.all(capacityPromises);
+            const newCapacityInfo: any = {};
+            results.forEach(res => {
+                newCapacityInfo[res.key] = res.info;
+            });
+            setCapacityInfo(newCapacityInfo);
+
         } catch (error) {
             console.error("Error loading templates:", error);
         } finally {
             setLoadingTemplates(false);
+            setLoadingCapacity(false);
         }
     };
 
@@ -225,7 +258,18 @@ export default function Students() {
 
     const handleCreateNew = () => {
         setEditingStudent(null);
-        setFormData({ fullName: '', dni: '', phone: '', email: '', birthDate: '', age: '', categoryId: '', packageId: '', paymentMethodId: '' });
+        setFormData({
+            fullName: '',
+            dni: '',
+            phone: '',
+            email: '',
+            birthDate: '',
+            age: '',
+            categoryId: '',
+            packageId: '',
+            paymentMethodId: '',
+            packageStartDate: ''
+        });
         setFixedSchedule([]);
         setPaymentData({
             amountPaid: '',
@@ -252,7 +296,8 @@ export default function Students() {
             age: student.age ? String(student.age) : '',
             categoryId: student.categoryId || '',
             packageId: student.currentPackageId || '',
-            paymentMethodId: ''
+            paymentMethodId: '',
+            packageStartDate: student.packageStartDate || ''
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
@@ -300,7 +345,8 @@ export default function Students() {
                     birthDate: formData.birthDate,
                     age: formData.age ? Number(formData.age) : null,
                     categoryId: formData.categoryId,
-                    fixedSchedule: fixedSchedule
+                    fixedSchedule: fixedSchedule,
+                    packageStartDate: formData.packageStartDate || null
                 });
                 setIsModalOpen(false);
                 loadStudents();
@@ -308,7 +354,8 @@ export default function Students() {
                 const newStudentDni = formData.dni || `TEMP_${Date.now()}`;
 
                 // Calculate package dates if package is selected or credits are added
-                let packageStartDate: string | undefined = paymentData.startDate || undefined;
+                // Prioritize formData.packageStartDate (from Step 2) over paymentData.startDate
+                let packageStartDate: string | undefined = formData.packageStartDate || paymentData.startDate || undefined;
                 let packageEndDate: string | undefined = paymentData.endDate || undefined;
 
                 await studentService.create({
@@ -508,10 +555,24 @@ export default function Students() {
             // Package selection is now manual as requested
             setFormData(prev => ({ ...prev, packageId: '' }));
             setSelectedPackage(null);
+
+            // If we have a minimum start date (due to full capacity), pre-fill it
+            let initialStartDate = paymentData.startDate;
+            if (minPackageStartDate) {
+                // Should we enforce this? Yes.
+                if (!initialStartDate || initialStartDate < minPackageStartDate) {
+                    initialStartDate = minPackageStartDate;
+                }
+            } else if (!initialStartDate) {
+                // If no date set, default to today
+                initialStartDate = new Date().toISOString().split('T')[0];
+            }
+
             setPaymentData(prev => ({
                 ...prev,
                 credits: '',
-                totalCost: '0.00'
+                totalCost: '0.00',
+                startDate: initialStartDate
             }));
         }
 
@@ -597,6 +658,11 @@ export default function Students() {
 
                                 <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
                                     {student.fullName}
+                                    {student.hasDebt && (
+                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold ml-2 animate-pulse">
+                                            DEUDA
+                                        </span>
+                                    )}
                                     {studentCategory && (
                                         <span
                                             className="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider"
@@ -778,46 +844,134 @@ export default function Students() {
                                                                     fixedSchedule.some(fs => fs.dayId === dayId && fs.timeId === template.timeSlot)
                                                                 );
 
-                                                                return (
-                                                                    <button
-                                                                        key={template.id}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            if (isSelected) {
-                                                                                // Remove all days for this slot
-                                                                                setFixedSchedule(fixedSchedule.filter(fs =>
-                                                                                    !(days.includes(fs.dayId) && fs.timeId === template.timeSlot)
-                                                                                ));
-                                                                            } else {
-                                                                                // Add all days for this slot
-                                                                                const newSlots = days.map(dayId => ({
-                                                                                    dayId,
-                                                                                    timeId: template.timeSlot
-                                                                                }));
-                                                                                setFixedSchedule([...fixedSchedule, ...newSlots]);
-                                                                            }
-                                                                        }}
-                                                                        className={`p-4 rounded-2xl border-2 text-left transition-all group relative overflow-hidden ${isSelected
-                                                                            ? 'bg-sky-600 border-sky-600 shadow-lg shadow-sky-600/20'
-                                                                            : 'bg-white border-slate-100 hover:border-sky-200 hover:bg-sky-50/10'
-                                                                            }`}
-                                                                    >
-                                                                        <div className="flex justify-between items-start mb-1 relative z-10">
-                                                                            <Clock className={`w-4 h-4 ${isSelected ? 'text-sky-100' : 'text-slate-400'}`} />
-                                                                            {isSelected && <CheckCircle className="w-4 h-4 text-white animate-in zoom-in" />}
-                                                                        </div>
-                                                                        <p className={`text-lg font-black relative z-10 ${isSelected ? 'text-white' : 'text-slate-800'}`}>
-                                                                            {template.timeSlot}
-                                                                        </p>
-                                                                        <p className={`text-[10px] uppercase font-bold tracking-tight relative z-10 ${isSelected ? 'text-sky-100' : 'text-slate-400'}`}>
-                                                                            {template.capacity} Cupos
-                                                                        </p>
+                                                                // Capacity Info
+                                                                const capInfo = capacityInfo[`${template.dayType}-${template.timeSlot}`];
+                                                                const isFull = capInfo?.isFull;
+                                                                const isLoading = loadingCapacity || !capInfo;
 
-                                                                        {/* Decorative background element */}
-                                                                        {isSelected && (
-                                                                            <div className="absolute -right-2 -bottom-2 w-12 h-12 bg-white/10 rounded-full blur-xl" />
+                                                                return (
+                                                                    <div key={template.id} className="relative group">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (isSelected) {
+                                                                                    // Remove all days for this slot
+                                                                                    setFixedSchedule(fixedSchedule.filter(fs =>
+                                                                                        !(days.includes(fs.dayId) && fs.timeId === template.timeSlot)
+                                                                                    ));
+                                                                                    // Clear min start date if we are deselecting the "constraining" schedule.
+                                                                                    // Since we only select ONE schedule pattern, clearing it is safe.
+                                                                                    setMinPackageStartDate(null);
+                                                                                    setFormData(prev => ({ ...prev, packageStartDate: '' }));
+
+                                                                                } else {
+                                                                                    // Add all days for this slot
+                                                                                    const newSlots = days.map(dayId => ({
+                                                                                        dayId,
+                                                                                        timeId: template.timeSlot
+                                                                                    }));
+                                                                                    setFixedSchedule(newSlots); // Replaces existing schedule (assuming single schedule selection)
+
+                                                                                    // If full, set min start date
+                                                                                    if (isFull && capInfo?.earliestAvailableDate) {
+                                                                                        const nextDate = new Date(capInfo.earliestAvailableDate);
+                                                                                        // The availability date is when it BECOMES available or when previous ends?
+                                                                                        // Usually "earliestAvailableDate" is the end date of current enrollment.
+                                                                                        // So start date should be +1 day or same day if it ends previously?
+                                                                                        // Let's assume +1 day to be safe if it's an end date.
+                                                                                        // But wait, monthly slots logic: if slot is FULL in Jan, available in Feb.
+                                                                                        // Earliest Available IS the start of the free period.
+                                                                                        // If logic returns specific date, let's respect it.
+
+                                                                                        const minDateStr = nextDate.toISOString().split('T')[0];
+                                                                                        setMinPackageStartDate(minDateStr);
+
+                                                                                        // We DO NOT set packageStartDate here anymore, user must choose in Step 3.
+                                                                                        // But we clear it just in case.
+                                                                                        setFormData(prev => ({ ...prev, packageStartDate: '' }));
+                                                                                    } else {
+                                                                                        setMinPackageStartDate(null);
+                                                                                        setFormData(prev => ({ ...prev, packageStartDate: '' }));
+                                                                                    }
+                                                                                }
+                                                                            }}
+                                                                            className={`w-full p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden ${isSelected
+                                                                                ? isFull
+                                                                                    ? 'bg-amber-50 border-amber-500 shadow-lg shadow-amber-500/20' // Selected but full
+                                                                                    : 'bg-sky-600 border-sky-600 shadow-lg shadow-sky-600/20'
+                                                                                : isFull
+                                                                                    ? 'bg-slate-50 border-slate-100 opacity-70 hover:opacity-100' // Full not selected
+                                                                                    : 'bg-white border-slate-100 hover:border-sky-200 hover:bg-sky-50/10'
+                                                                                }`}
+                                                                        >
+                                                                            <div className="flex justify-between items-start mb-1 relative z-10">
+                                                                                <Clock className={`w-4 h-4 ${isSelected ? (isFull ? 'text-amber-600' : 'text-sky-100') : 'text-slate-400'}`} />
+                                                                                {isSelected && <CheckCircle className={`w-4 h-4 animate-in zoom-in ${isFull ? 'text-amber-600' : 'text-white'}`} />}
+                                                                            </div>
+                                                                            <p className={`text-lg font-black relative z-10 ${isSelected ? (isFull ? 'text-amber-900' : 'text-white') : 'text-slate-800'}`}>
+                                                                                {template.timeSlot}
+                                                                            </p>
+
+                                                                            {/* Capacity Display */}
+                                                                            <div className={`mt-1 relative z-10`}>
+                                                                                {isLoading ? (
+                                                                                    <span className="text-[10px] text-slate-400">Cargando cupos...</span>
+                                                                                ) : isFull ? (
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isSelected ? 'text-amber-700' : 'text-red-500'}`}>
+                                                                                            ⚠️ LLENO ({capInfo.currentEnrollment}/{capInfo.totalCapacity})
+                                                                                        </span>
+                                                                                        {capInfo.earliestAvailableDate && (
+                                                                                            <span className={`text-[9px] mt-0.5 ${isSelected ? 'text-amber-800/70' : 'text-slate-400'}`}>
+                                                                                                Libre: {new Date(capInfo.earliestAvailableDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className={`text-[10px] uppercase font-bold tracking-tight ${isSelected ? 'text-sky-100' : 'text-emerald-600'}`}>
+                                                                                        {capInfo.available}/{capInfo.totalCapacity} disponibles
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+
+                                                                            {/* Decorative background element */}
+                                                                            {isSelected && (
+                                                                                <div className="absolute -right-2 -bottom-2 w-12 h-12 bg-white/10 rounded-full blur-xl" />
+                                                                            )}
+                                                                        </button>
+
+                                                                        {/* Informational Message for Full Schedule */}
+                                                                        {isSelected && isFull && !editingStudent && capInfo?.earliestAvailableDate && (
+                                                                            <div className="absolute top-full left-0 right-0 mt-2 z-20 animate-in slide-in-from-top-2">
+                                                                                <div className="bg-amber-50 p-2 rounded-lg border border-amber-200 text-center shadow-sm">
+                                                                                    <p className="text-[10px] text-amber-800 leading-tight">
+                                                                                        <strong>¡Reserva Futura!</strong><br />
+                                                                                        El alumno será inscrito pero su cupo iniciará el <strong>{new Date(capInfo.earliestAvailableDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>.
+                                                                                    </p>
+                                                                                </div>
+                                                                            </div>
                                                                         )}
-                                                                    </button>
+
+                                                                        {/* Date Picker (EDITING STUDENT) */}
+                                                                        {isSelected && isFull && editingStudent && (
+                                                                            <div className="absolute top-full left-0 right-0 mt-2 z-20 animate-in slide-in-from-top-2">
+                                                                                <div className="bg-white p-3 rounded-xl border-2 border-amber-200 shadow-xl">
+                                                                                    <label className="block text-[10px] font-bold text-amber-600 uppercase mb-1">
+                                                                                        Iniciar cambio desde:
+                                                                                    </label>
+                                                                                    <input
+                                                                                        type="date"
+                                                                                        required
+                                                                                        className="w-full text-xs font-bold text-slate-700 border-b border-amber-200 focus:outline-none focus:border-amber-500 bg-transparent py-1"
+                                                                                        value={formData.packageStartDate}
+                                                                                        min={minPackageStartDate || ''}
+                                                                                        onChange={(e) => setFormData(prev => ({ ...prev, packageStartDate: e.target.value }))}
+                                                                                        onClick={(e) => e.stopPropagation()}
+                                                                                    />
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 );
                                                             })}
                                                         </div>
@@ -917,11 +1071,17 @@ export default function Students() {
                                                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                                         <input
                                                             type="date"
-                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold"
+                                                            className={`w-full pl-10 pr-3 py-3 rounded-xl border focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold ${minPackageStartDate ? 'border-amber-300 bg-amber-50/50 text-amber-900' : 'border-slate-200'}`}
                                                             value={paymentData.startDate}
+                                                            min={minPackageStartDate || undefined}
                                                             onChange={e => setPaymentData({ ...paymentData, startDate: e.target.value })}
                                                         />
                                                     </div>
+                                                    {minPackageStartDate && (
+                                                        <p className="text-[10px] text-amber-600 font-medium">
+                                                            ⚠️ Limitada por cupo disponible
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <div className="space-y-1">
                                                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Fecha Fin</label>

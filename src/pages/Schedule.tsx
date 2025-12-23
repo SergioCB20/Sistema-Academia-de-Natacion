@@ -353,21 +353,26 @@ export default function Schedule() {
                                             <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
                                                 <button
                                                     onClick={() => openBookingModal(slot)}
-                                                    className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${colorClass} ${hasDebtor ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
+                                                    className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${hasDebtor
+                                                            ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
+                                                            : colorClass
+                                                        }`}
                                                 >
                                                     <div className="flex items-center justify-between w-full">
-                                                        <span className="text-[10px] font-bold opacity-70">
+                                                        <span className={`text-[10px] font-bold opacity-70 ${hasDebtor ? 'text-orange-900' : ''}`}>
                                                             {hour.label.split(' - ')[0]}
                                                         </span>
-                                                        {isFull && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
+                                                        {isFull && !hasDebtor && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
+                                                        {hasDebtor && <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>}
                                                     </div>
 
                                                     <div className="flex items-center gap-1.5 self-end">
-                                                        {hasDebtor && (
-                                                            <DollarSign className="w-3 h-3 text-red-600 animate-pulse" />
+                                                        {hasDebtor ? (
+                                                            <DollarSign className="w-3 h-3 text-orange-600 animate-pulse" />
+                                                        ) : (
+                                                            <Users className="w-3 h-3" />
                                                         )}
-                                                        <Users className="w-3 h-3" />
-                                                        <span className="text-xs font-bold font-mono">
+                                                        <span className={`text-xs font-bold font-mono ${hasDebtor ? 'text-orange-900' : ''}`}>
                                                             {slot.attendeeIds?.length ?? 0}/{slot.capacity}
                                                         </span>
                                                     </div>

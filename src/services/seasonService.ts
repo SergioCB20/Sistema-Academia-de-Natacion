@@ -14,6 +14,7 @@ import {
     limit
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { getMonthsInRange, formatMonthId } from '../utils/monthUtils';
 // import { loggingService } from './logging';
 import type { Season } from '../types/db';
 
@@ -48,14 +49,12 @@ export const seasonService = {
     async getAll(): Promise<Season[]> {
         const q = query(
             collection(db, SEASONS_COLLECTION),
-            orderBy('startDate', 'desc')
+            orderBy('startMonth', 'desc')
         );
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({
             ...doc.data(),
             id: doc.id,
-            startDate: doc.data().startDate?.toDate() || new Date(),
-            endDate: doc.data().endDate?.toDate() || new Date(),
             createdAt: doc.data().createdAt?.toDate() || new Date(),
             updatedAt: doc.data().updatedAt?.toDate() || new Date()
         } as Season));
@@ -66,6 +65,7 @@ export const seasonService = {
      */
     async getActiveSeason(): Promise<Season | null> {
         const now = new Date();
+        const currentMonth = formatMonthId(now);
         const seasons = await this.getAll();
 
         // First, check for manually set active season
@@ -74,11 +74,9 @@ export const seasonService = {
             return manuallyActive;
         }
 
-        // Otherwise, find season that contains current date
+        // Otherwise, find season that contains current month
         const currentSeason = seasons.find(s => {
-            const start = new Date(s.startDate);
-            const end = new Date(s.endDate);
-            return now >= start && now <= end;
+            return currentMonth >= s.startMonth && currentMonth <= s.endMonth;
         });
 
         return currentSeason || null;
@@ -106,8 +104,6 @@ export const seasonService = {
         return {
             ...docSnap.data(),
             id: docSnap.id,
-            startDate: docSnap.data().startDate?.toDate() || new Date(),
-            endDate: docSnap.data().endDate?.toDate() || new Date(),
             createdAt: docSnap.data().createdAt?.toDate() || new Date(),
             updatedAt: docSnap.data().updatedAt?.toDate() || new Date()
         } as Season;
@@ -121,8 +117,6 @@ export const seasonService = {
 
         const newSeason = {
             ...data,
-            startDate: Timestamp.fromDate(new Date(data.startDate)),
-            endDate: Timestamp.fromDate(new Date(data.endDate)),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
         };
@@ -149,14 +143,6 @@ export const seasonService = {
             ...data,
             updatedAt: Timestamp.now()
         };
-
-        // Convert dates to Timestamps if present
-        if (data.startDate) {
-            updateData.startDate = Timestamp.fromDate(new Date(data.startDate));
-        }
-        if (data.endDate) {
-            updateData.endDate = Timestamp.fromDate(new Date(data.endDate));
-        }
 
         await updateDoc(docRef, updateData);
 
@@ -229,16 +215,21 @@ export const seasonService = {
         const q = query(
             collection(db, SEASONS_COLLECTION),
             where('type', '==', type),
-            orderBy('startDate', 'desc')
+            orderBy('startMonth', 'desc')
         );
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({
             ...doc.data(),
             id: doc.id,
-            startDate: doc.data().startDate?.toDate() || new Date(),
-            endDate: doc.data().endDate?.toDate() || new Date(),
             createdAt: doc.data().createdAt?.toDate() || new Date(),
             updatedAt: doc.data().updatedAt?.toDate() || new Date()
         } as Season));
+    },
+
+    /**
+     * Get array of month IDs in a season
+     */
+    getMonthsInSeason(season: Season): string[] {
+        return getMonthsInRange(season.startMonth, season.endMonth);
     }
 };
