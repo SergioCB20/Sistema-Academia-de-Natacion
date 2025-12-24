@@ -59,7 +59,7 @@ export default function MainLayout() {
             )}>
                 <div className="flex flex-col h-full">
                     <div className="p-6 border-b border-slate-800 flex justify-center">
-                        <img src="/logo.jpg" alt="Los Parrales" className="h-20 object-contain" />
+                        <img src="/logo.png" alt="Los Parrales" className="h-24 object-contain" />
                     </div>
 
                     <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
@@ -136,7 +136,7 @@ export default function MainLayout() {
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Mobile Header */}
                 <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm">
-                    <img src="/logo.jpg" alt="Los Parrales" className="h-10 w-auto" />
+                    <img src="/logo.png" alt="Los Parrales" className="h-12 w-auto" />
                     <div className="flex items-center gap-2">
                         <SeasonSelector className="hidden sm:block" />
                         <button

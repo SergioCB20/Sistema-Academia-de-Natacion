@@ -37,7 +37,7 @@ export default function Login() {
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
                 <div className="bg-sky-500 p-8 text-center flex justify-center">
-                    <img src="/logo.jpg" alt="Los Parrales" className="h-32 object-contain" />
+                    <img src="/logo.png" alt="Los Parrales" className="h-40 object-contain" />
                 </div>
 
                 <div className="p-8">
