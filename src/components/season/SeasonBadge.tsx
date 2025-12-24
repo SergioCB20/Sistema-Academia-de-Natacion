@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSeason } from '../../contexts/SeasonContext';
-import type { Season } from '../../types/db';
+
 
 interface SeasonBadgeProps {
     className?: string;

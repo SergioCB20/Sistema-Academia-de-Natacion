@@ -26,6 +26,8 @@ export interface Season {
         end: string; // "21:30"
     };
     isActive: boolean;
+    startDate: string; // "YYYY-MM-DD" (Calculated)
+    endDate: string; // "YYYY-MM-DD" (Calculated)
     createdAt: Date;
     updatedAt: Date;
 }

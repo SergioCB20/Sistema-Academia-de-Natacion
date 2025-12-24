@@ -48,7 +48,12 @@ export default function Seasons() {
                     start: formData.workingHoursStart,
                     end: formData.workingHoursEnd
                 },
-                isActive: formData.isActive
+                isActive: formData.isActive,
+                startDate: `${formData.startMonth}-01`,
+                endDate: (() => {
+                    const [y, m] = formData.endMonth.split('-').map(Number);
+                    return new Date(y, m, 0).toISOString().split('T')[0];
+                })()
             };
 
             if (editingSeason) {

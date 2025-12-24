@@ -134,7 +134,7 @@ export const packageValidationService = {
             const availablePackages = await this.getAvailablePackages(seasonId, categoryId);
 
             return availablePackages.filter(pkg =>
-                this.canCompleteBeforeSeasonEnd(pkg, classesPerWeek, season.endDate)
+                this.canCompleteBeforeSeasonEnd(pkg, classesPerWeek, new Date(season.endDate))
             );
         } catch (error) {
             console.error('Error getting completable packages:', error);

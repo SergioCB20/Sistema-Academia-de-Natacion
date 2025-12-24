@@ -3,8 +3,7 @@ import {
     doc,
     getDocs,
     getDoc,
-    setDoc,
-    updateDoc,
+
     query,
     where,
     runTransaction,
@@ -16,7 +15,6 @@ import {
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
 import { scheduleTemplateService } from './scheduleTemplateService';
-import { studentService } from './students';
 import { getMonthsInRange } from '../utils/monthUtils';
 import type { MonthlySlot, MonthlyEnrollment, Student } from '../types/db';
 
