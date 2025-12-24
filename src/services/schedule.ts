@@ -196,7 +196,7 @@ export const scheduleService = {
             }
 
             const slot = slotDoc.data() as DailySlot;
-            const student = studentDoc.data();
+            // const student = studentDoc.data();
 
             if (!slot.attendeeIds.includes(studentId)) {
                 throw new Error("El alumno no está en este horario.");
@@ -251,7 +251,7 @@ export const scheduleService = {
             const slot = docSnap.data() as DailySlot;
 
             // Check if slot time has passed
-            const [startStr, endStr] = (slot.timeSlot || "23:59-23:59").split('-');
+            const [, endStr] = (slot.timeSlot || "23:59-23:59").split('-');
             const slotDateStr = typeof slot.date === 'string' ? slot.date : new Date(slot.date).toISOString().split('T')[0];
             const slotEndTime = new Date(`${slotDateStr}T${endStr || "23:59"}:00`);
 

@@ -14,13 +14,15 @@ export default function Schedule() {
     const getInitialDate = () => {
         const today = new Date();
         if (currentSeason) {
-            const seasonStart = new Date(currentSeason.startDate);
+            // Parse startMonth (YYYY-MM) to Date
+            const [year, month] = currentSeason.startMonth.split('-').map(Number);
+            const seasonStart = new Date(year, month - 1, 1);
             // Reset hours to compare dates only
             today.setHours(0, 0, 0, 0);
             seasonStart.setHours(0, 0, 0, 0);
 
             if (today < seasonStart) {
-                return new Date(currentSeason.startDate);
+                return new Date(year, month - 1, 1);
             }
         }
         return today;
@@ -32,12 +34,14 @@ export default function Schedule() {
     useEffect(() => {
         if (currentSeason) {
             const today = new Date();
-            const seasonStart = new Date(currentSeason.startDate);
+            // Parse startMonth (YYYY-MM) to Date
+            const [year, month] = currentSeason.startMonth.split('-').map(Number);
+            const seasonStart = new Date(year, month - 1, 1);
             today.setHours(0, 0, 0, 0);
             seasonStart.setHours(0, 0, 0, 0);
 
             if (today < seasonStart) {
-                setCurrentDate(new Date(currentSeason.startDate));
+                setCurrentDate(new Date(year, month - 1, 1));
             } else {
                 // Optional: Reset to today if switch back to a current season?
                 // For now, let's just respect the "if before season, jump to start" rule.
@@ -354,8 +358,8 @@ export default function Schedule() {
                                                 <button
                                                     onClick={() => openBookingModal(slot)}
                                                     className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${hasDebtor
-                                                            ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
-                                                            : colorClass
+                                                        ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
+                                                        : colorClass
                                                         }`}
                                                 >
                                                     <div className="flex items-center justify-between w-full">

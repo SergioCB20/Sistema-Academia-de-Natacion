@@ -58,9 +58,8 @@ export default function MainLayout() {
                 isSidebarOpen ? "translate-x-0" : "-translate-x-full"
             )}>
                 <div className="flex flex-col h-full">
-                    <div className="p-6 border-b border-slate-800">
-                        <h1 className="text-2xl font-bold tracking-tight text-sky-400">Los Parrales</h1>
-                        <p className="text-xs text-slate-400 uppercase tracking-widest mt-1">Academia de Natación</p>
+                    <div className="p-6 border-b border-slate-800 flex justify-center">
+                        <img src="/logo.jpg" alt="Los Parrales" className="h-20 object-contain" />
                     </div>
 
                     <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
@@ -137,7 +136,7 @@ export default function MainLayout() {
             <div className="flex-1 flex flex-col min-w-0">
                 {/* Mobile Header */}
                 <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm">
-                    <h1 className="text-lg font-bold text-slate-800">Los Parrales</h1>
+                    <img src="/logo.jpg" alt="Los Parrales" className="h-10 w-auto" />
                     <div className="flex items-center gap-2">
                         <SeasonSelector className="hidden sm:block" />
                         <button
