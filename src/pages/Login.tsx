@@ -36,9 +36,8 @@ export default function Login() {
     return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-                <div className="bg-sky-500 p-8 text-center">
-                    <h1 className="text-3xl font-bold text-white mb-2">Los Parrales</h1>
-                    <p className="text-sky-100">Academia de Natación</p>
+                <div className="bg-sky-500 p-8 text-center flex justify-center">
+                    <img src="/logo.jpg" alt="Los Parrales" className="h-32 object-contain" />
                 </div>
 
                 <div className="p-8">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { packageService } from '../../services/packageService';
-
+import { categoryService } from '../../services/categoryService';
 import { useSeason } from '../../contexts/SeasonContext';
 import type { Package } from '../../types/db';
 
@@ -28,7 +28,10 @@ export default function Packages() {
 
         try {
             setIsLoading(true);
-            const pkgs = await packageService.getBySeason(currentSeason.id);
+            const [pkgs] = await Promise.all([
+                packageService.getBySeason(currentSeason.id),
+                categoryService.getActive()
+            ]);
             setPackages(pkgs);
         } catch (error) {
             console.error('Error loading data:', error);

@@ -15,7 +15,8 @@ import {
     DollarSign,
     Printer,
     Clock,
-    AlertCircle
+    AlertCircle,
+    AlertTriangle
 } from 'lucide-react';
 import { studentService } from '../services/students';
 import { categoryService } from '../services/categoryService';
@@ -23,6 +24,8 @@ import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { paymentMethodService } from '../services/paymentMethodService';
 import { seasonService } from '../services/seasonService';
 import { packageValidationService } from '../services/packageValidation';
+import { getNextMonth, getPreviousMonth, formatMonthId, getMonthName } from '../utils/monthUtils';
+import { calculateRealRemaining } from '../utils/studentUtils';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplate, PaymentMethodConfig } from '../types/db';
 
@@ -534,6 +537,19 @@ export default function Students() {
                 alert("El nombre es requerido.");
                 return;
             }
+
+            // Check for duplicate name (case insensitive, ignoring accents)
+            const normalize = (str: string) =>
+                str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+            const targetName = normalize(formData.fullName);
+            const isDuplicate = students.some(s => normalize(s.fullName) === targetName);
+
+            if (isDuplicate) {
+                if (!confirm(`El alumno "${formData.fullName}" ya parece estar registrado. ¿Desea continuar de todos modos?`)) {
+                    return;
+                }
+            }
             if (formData.dni && !/^\d{8}$/.test(formData.dni)) {
                 alert("El DNI debe tener 8 números exactos.");
                 return;
@@ -596,77 +612,7 @@ export default function Students() {
     const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
 
     // Helper: Calculate elapsed classes for a student based on schedule and start date
-    const calculateRealRemaining = (student: Student) => {
-        if (!student.packageStartDate || !student.fixedSchedule || student.fixedSchedule.length === 0) {
-            return student.remainingCredits;
-        }
-
-        try {
-            // Note: Use string parsing to avoid UTC shifts
-            const [y, m, d] = student.packageStartDate.split('-').map(Number);
-            const startDate = new Date(y, m - 1, d, 0, 0, 0); // Local start
-            const now = new Date();
-
-            if (now < startDate) return student.remainingCredits;
-
-            let elapsed = 0;
-            const dayMap: Record<string, number> = { 'DOM': 0, 'LUN': 1, 'MAR': 2, 'MIE': 3, 'JUE': 4, 'VIE': 5, 'SAB': 6 };
-
-            const tempDate = new Date(startDate);
-            // Limit loop to avoid infinite loops in weird cases (max 365 days lookahead)
-            const MAX_DAYS = 365;
-            let safety = 0;
-
-            while (tempDate <= now && safety < MAX_DAYS) {
-                // If this day matches schedule
-                const currentDayIndex = tempDate.getDay();
-                const dayCode = Object.keys(dayMap).find(key => dayMap[key] === currentDayIndex);
-
-                if (dayCode) {
-                    // Check if student has class this day
-                    const isClassDay = student.fixedSchedule.some(s => s.dayId === dayCode);
-
-                    if (isClassDay) {
-                        const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                        const tempMidnight = new Date(tempDate.getFullYear(), tempDate.getMonth(), tempDate.getDate());
-
-                        // If it's strictly in the past (yesterday or before), count it
-                        if (tempMidnight < todayMidnight) {
-                            elapsed++;
-                        } else if (tempMidnight.getTime() === todayMidnight.getTime()) {
-                            // If it's TODAY, check time
-                            // Find the relevant time slots
-                            const slots = student.fixedSchedule.filter(s => s.dayId === dayCode);
-                            let slotPassed = false;
-
-                            // If multiple slots per day, 1 credit per slot (usually)
-                            slots.forEach(slot => {
-                                // Time format "HH:MM-HH:MM"
-                                const [, endStr] = slot.timeId.split('-');
-                                const [h, min] = endStr.split(':').map(Number);
-                                const classEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, min, 0);
-                                if (new Date() > classEndTime) {
-                                    slotPassed = true; // At least one slot passed
-                                }
-                            });
-
-                            if (slotPassed) elapsed++;
-                        }
-                    }
-                }
-
-                tempDate.setDate(tempDate.getDate() + 1);
-                safety++;
-            }
-
-            const realRemaining = student.remainingCredits - elapsed;
-            return realRemaining;
-        } catch (e) {
-            console.error("Error calculating remaining:", e);
-            return student.remainingCredits;
-        }
-    };
-
+    // calculateRealRemaining is now imported from ../utils/studentUtils
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -757,7 +703,13 @@ export default function Students() {
                                 <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
                                     <Phone className="w-4 h-4" />
                                     <span>{student.phone}</span>
+                                    <span>{student.phone}</span>
                                 </div>
+                                {student.studentCode && (
+                                    <div className="flex items-center gap-2 text-sm text-sky-600 font-mono mb-4 bg-sky-50 px-2 py-1 rounded w-fit">
+                                        <span className="font-bold">#{student.studentCode}</span>
+                                    </div>
+                                )}
 
                                 <div className="flex justify-between items-center pt-4 border-t border-slate-50">
                                     <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${calculateRealRemaining(student) > 0
@@ -814,9 +766,34 @@ export default function Students() {
                                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Datos Personales</h4>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo *</label>
-                                        <input required type="text" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                            value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })}
-                                        />
+                                        <div className="relative">
+                                            <input required type="text" className={`w-full px-4 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-sky-500/50 uppercase ${(() => {
+                                                if (!formData.fullName) return 'border-slate-200';
+                                                const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                const target = normalize(formData.fullName);
+                                                const isDup = students.some(s => normalize(s.fullName) === target);
+                                                return isDup ? 'border-amber-400 bg-amber-50 text-amber-900 focus:border-amber-500 focus:ring-amber-200' : 'border-slate-200';
+                                            })()}`}
+                                                value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value.toUpperCase() })}
+                                            />
+                                            {(() => {
+                                                if (!formData.fullName) return null;
+                                                const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                const target = normalize(formData.fullName);
+                                                const isDup = students.some(s => normalize(s.fullName) === target);
+                                                if (isDup) {
+                                                    return (
+                                                        <div className="absolute right-3 top-2.5 group">
+                                                            <AlertTriangle className="w-5 h-5 text-amber-500 animate-pulse" />
+                                                            <div className="absolute right-0 w-48 p-2 bg-amber-100 text-amber-800 text-xs rounded-lg shadow-lg border border-amber-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -top-10">
+                                                                Nombre ya registrado (posible duplicado)
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Edad *</label>

@@ -5,6 +5,7 @@ import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
 import { useSeason } from '../contexts/SeasonContext';
 import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth } from '../utils/monthUtils';
+import { calculateRealRemaining } from '../utils/studentUtils';
 import type { MonthlySlot, MonthlyEnrollment, Student, Category } from '../types/db';
 
 export default function MonthlySchedule() {
@@ -319,8 +320,8 @@ export default function MonthlySchedule() {
                                                         <button
                                                             onClick={() => openModal(slot)}
                                                             className={`w-full rounded-lg border p-3 transition-all ${hasDebtor
-                                                                    ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 shadow-sm'
-                                                                    : `${colorClass} hover:shadow-md`
+                                                                ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 shadow-sm'
+                                                                : `${colorClass} hover:shadow-md`
                                                                 }`}
                                                         >
                                                             <div className="flex flex-col gap-2">
@@ -463,10 +464,25 @@ export default function MonthlySchedule() {
                                                 ${isFuture ? 'bg-amber-50 border-amber-100' : 'hover:bg-slate-50 hover:border-slate-100'}`}
                                             >
                                                 <div className="flex-1">
-                                                    <p className={`font-bold ${isFuture ? 'text-amber-800' : 'text-slate-700'}`}>
-                                                        {enrollment.studentName}
-                                                        {isFuture && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">FUTURO</span>}
-                                                    </p>
+                                                    <div className='flex justify-between items-center mr-2'>
+                                                        <p className={`font-bold ${isFuture ? 'text-amber-800' : 'text-slate-700'}`}>
+                                                            {enrollment.studentName}
+                                                            {isFuture && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">FUTURO</span>}
+                                                        </p>
+                                                        {(() => {
+                                                            const student = students.find(s => s.id === enrollment.studentId);
+                                                            if (student) {
+                                                                const available = calculateRealRemaining(student);
+                                                                const total = student.remainingCredits;
+                                                                return (
+                                                                    <span className="text-xs font-mono font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded">
+                                                                        {available}/{total}
+                                                                    </span>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
+                                                    </div>
                                                     <div className="text-xs space-y-0.5 mt-0.5">
                                                         {isFuture && (
                                                             <p className="text-amber-600 font-bold flex items-center gap-1">
