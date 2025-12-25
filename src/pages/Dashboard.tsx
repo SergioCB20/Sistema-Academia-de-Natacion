@@ -8,7 +8,6 @@ import { Calendar } from 'lucide-react';
 
 export default function Dashboard() {
     const [stats, setStats] = useState({
-        classesToday: 0,
         activeStudents: 0,
         newStudentsMonth: 0,
         incomeToday: 0
@@ -71,8 +70,7 @@ export default function Dashboard() {
                 <span className="text-sm text-slate-500">{new Date().toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <DashboardCard title="Clases Hoy" value={loading ? '...' : stats.classesToday} />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <DashboardCard title="Alumnos Activos" value={loading ? '...' : stats.activeStudents} />
                 <DashboardCard title="Nuevos (Mes)" value={loading ? '...' : stats.newStudentsMonth} />
                 <DashboardCard title="Ingresos (Hoy)" value={loading ? '...' : `S/ ${stats.incomeToday.toFixed(2)}`} />

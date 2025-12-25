@@ -24,7 +24,6 @@ import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { paymentMethodService } from '../services/paymentMethodService';
 import { seasonService } from '../services/seasonService';
 import { packageValidationService } from '../services/packageValidation';
-import { getNextMonth, getPreviousMonth, formatMonthId, getMonthName } from '../utils/monthUtils';
 import { calculateRealRemaining } from '../utils/studentUtils';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplate, PaymentMethodConfig } from '../types/db';

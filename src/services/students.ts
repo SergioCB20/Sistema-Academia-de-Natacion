@@ -1,14 +1,16 @@
 import {
     collection,
     doc,
-    updateDoc,
-    deleteDoc,
     getDocs,
+    getDoc,
+    setDoc,
+    updateDoc,
     query,
     where,
     orderBy,
     limit,
-    runTransaction
+    runTransaction,
+    increment // <-- AGREGAR ESTO
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -69,9 +71,15 @@ export const studentService = {
                 const currentCount = metadataDoc.data().students || 0;
                 const nextCount = currentCount + 1;
                 nextCode = nextCount.toString().padStart(5, '0');
-                transaction.update(metadataRef, { students: nextCount });
+                transaction.update(metadataRef, {
+                    students: nextCount,
+                    activeStudents: increment(1)
+                });
             } else {
-                transaction.set(metadataRef, { students: 1 });
+                transaction.set(metadataRef, {
+                    students: 1,
+                    activeStudents: 1
+                });
             }
 
 
@@ -276,27 +284,35 @@ export const studentService = {
     /**
      * Updates student basic info.
      */
-    async update(studentId: string, data: Partial<Omit<Student, 'id' | 'remainingCredits' | 'hasDebt'>>): Promise<void> {
-        const ref = doc(db, STUDENTS_COLLECTION, studentId);
-        await updateDoc(ref, data);
+    async update(id: string, updates: Partial<Student>): Promise<void> {
+        const studentRef = doc(db, STUDENTS_COLLECTION, id);
 
-        // If fixedSchedule was updated, sync slots
-        // If fixedSchedule was updated, sync slots
-        if (data.fixedSchedule) {
-            try {
-                // DO NOT CATCH - let validation errors propagate to UI? 
-                // In update context, blocking might be annoying if data is partial. 
-                // But for schedule consistency, we SHOULD block.
-                await this.syncFixedScheduleToMonthlySlots(
-                    studentId,
-                    data.fixedSchedule,
-                    data.packageEndDate,
-                    data.packageStartDate
-                );
-            } catch (e) {
-                console.error("Error syncing slots on update:", e);
-                throw e; // Propagate error so UI shows it
-            }
+        // Get current student data to check if being deactivated
+        const studentDoc = await getDoc(studentRef);
+        if (!studentDoc.exists()) {
+            throw new Error("Estudiante no encontrado");
+        }
+
+        const currentData = studentDoc.data();
+        const wasActive = currentData.active !== false; // Default to true if not set
+        const willBeActive = updates.active !== false; // Check if being deactivated
+
+        await updateDoc(studentRef, updates);
+
+        // If student is being deactivated, decrement counter
+        if (wasActive && !willBeActive) {
+            const metadataRef = doc(db, 'metadata', 'counters');
+            await updateDoc(metadataRef, {
+                activeStudents: increment(-1)
+            });
+        }
+
+        // If student is being reactivated, increment counter
+        if (!wasActive && willBeActive) {
+            const metadataRef = doc(db, 'metadata', 'counters');
+            await updateDoc(metadataRef, {
+                activeStudents: increment(1)
+            });
         }
     },
 
@@ -306,7 +322,6 @@ export const studentService = {
      */
     async delete(studentId: string): Promise<void> {
         const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
-        const metadataRef = doc(db, 'metadata', 'counters');
 
         await runTransaction(db, async (transaction) => {
             // 1. Get student to delete
@@ -317,6 +332,7 @@ export const studentService = {
             const deletedCode = studentData.studentCode;
 
             // 2. Lock metadata (prevents new creations during this shift)
+            const metadataRef = doc(db, 'metadata', 'counters');
             const metadataDoc = await transaction.get(metadataRef);
 
             if (deletedCode) {
@@ -340,9 +356,7 @@ export const studentService = {
                 // Update counter
                 if (metadataDoc.exists()) {
                     const currentCount = metadataDoc.data().students || 0;
-                    if (currentCount > 0) {
-                        transaction.update(metadataRef, { students: currentCount - 1 });
-                    }
+                    transaction.update(metadataRef, { students: Math.max(0, currentCount - 1) });
                 }
 
                 // Shift codes down
@@ -457,19 +471,6 @@ export const studentService = {
 
         const ref = doc(db, STUDENTS_COLLECTION, studentId);
         await updateDoc(ref, { hasDebt });
-    },
-
-    /**
-     * Get count of active students
-     */
-    async getActiveStudentsCount(): Promise<number> {
-        const q = query(
-            collection(db, STUDENTS_COLLECTION),
-            where('active', '==', true)
-        );
-        // Using getCountFromServer if available would be cheaper, but for now:
-        const snap = await getDocs(q);
-        return snap.size;
     },
 
     /**
@@ -676,6 +677,32 @@ export const studentService = {
         }
 
         return { matchingSlots };
+    },
+
+    async getActiveStudentsCount(): Promise<number> {
+        const metadataRef = doc(db, 'metadata', 'counters');
+        const metadataDoc = await getDoc(metadataRef);
+
+        if (!metadataDoc.exists()) {
+            // Fallback: count manually (only first time)
+            const q = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('active', '==', true)
+            );
+            const snapshot = await getDocs(q);
+            const count = snapshot.size;
+
+            // Initialize counter
+            await setDoc(metadataRef, {
+                students: count,
+                activeStudents: count,
+                lastUpdated: Date.now()
+            }, { merge: true });
+
+            return count;
+        }
+
+        return metadataDoc.data().activeStudents || 0;
     }
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Users, Calendar, DollarSign, Menu, LogOut, CreditCard, Settings, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -7,9 +7,6 @@ import { SeasonSelector } from '../season/SeasonSelector';
 // import { signOut } from 'firebase/auth'; // Uncomment when auth is fully ready
 
 import { useAuth } from '../../context/AuthContext';
-import { scheduleService } from '../../services/schedule';
-
-// ...
 
 export default function MainLayout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -21,14 +18,7 @@ export default function MainLayout() {
         navigate('/login');
     };
 
-    // Trigger lazy deduction for past sessions (Unified Lazy Deduction)
-    useEffect(() => {
-        if (role === 'ADMIN') {
-            scheduleService.processPastSessions()
-                .then(() => console.log('Background credit processing complete'))
-                .catch(err => console.error('Error processing credits:', err));
-        }
-    }, [role]);
+
 
     const navItems = [
         { to: '/', icon: LayoutDashboard, label: 'Panel', roles: ['ADMIN'] },

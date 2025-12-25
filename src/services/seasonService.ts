@@ -182,13 +182,19 @@ export const seasonService = {
      * Delete a season and all related data (CASCADING DELETE)
      */
     async delete(id: string): Promise<void> {
-        // 1. Delete Daily Slots (Schedule)
-        await deleteCollectionBySeason('daily_slots', id);
+        // 1. Delete Monthly Slots
+        await deleteCollectionBySeason('monthly_slots', id);
 
-        // 2. Delete Students
+        // 2. Delete Schedule Templates
+        await deleteCollectionBySeason('schedule_templates', id);
+
+        // 3. Delete Packages
+        await deleteCollectionBySeason('packages', id);
+
+        // 4. Delete Students
         await deleteCollectionBySeason('students', id);
 
-        // 3. Delete the Season itself
+        // 5. Delete the Season itself
         const docRef = doc(db, SEASONS_COLLECTION, id);
         await deleteDoc(docRef);
 
