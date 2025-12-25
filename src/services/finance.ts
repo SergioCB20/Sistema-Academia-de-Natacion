@@ -1,6 +1,6 @@
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
-import { Payment, PaymentMethod } from '../types/db';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { Payment } from '../types/db';
 
 export interface DailyFinanceData {
     day: number;

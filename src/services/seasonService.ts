@@ -52,12 +52,25 @@ export const seasonService = {
             orderBy('startMonth', 'desc')
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
-            ...doc.data(),
-            id: doc.id,
-            createdAt: doc.data().createdAt?.toDate() || new Date(),
-            updatedAt: doc.data().updatedAt?.toDate() || new Date()
-        } as Season));
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            const startMonth = data.startMonth || '2025-01';
+            const endMonth = data.endMonth || '2025-02';
+
+            // Calculate start and end dates
+            const startDate = `${startMonth}-01`;
+            const [endYear, endMonthNum] = endMonth.split('-').map(Number);
+            const endDate = new Date(endYear, endMonthNum, 0).toISOString().split('T')[0];
+
+            return {
+                ...data,
+                id: doc.id,
+                startDate,
+                endDate,
+                createdAt: data.createdAt?.toDate() || new Date(),
+                updatedAt: data.updatedAt?.toDate() || new Date()
+            } as Season;
+        });
     },
 
     /**
@@ -101,11 +114,22 @@ export const seasonService = {
             return null;
         }
 
+        const data = docSnap.data();
+        const startMonth = data.startMonth || '2025-01';
+        const endMonth = data.endMonth || '2025-02';
+
+        // Calculate start and end dates
+        const startDate = `${startMonth}-01`;
+        const [endYear, endMonthNum] = endMonth.split('-').map(Number);
+        const endDate = new Date(endYear, endMonthNum, 0).toISOString().split('T')[0];
+
         return {
-            ...docSnap.data(),
+            ...data,
             id: docSnap.id,
-            createdAt: docSnap.data().createdAt?.toDate() || new Date(),
-            updatedAt: docSnap.data().updatedAt?.toDate() || new Date()
+            startDate,
+            endDate,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date()
         } as Season;
     },
 
@@ -158,13 +182,19 @@ export const seasonService = {
      * Delete a season and all related data (CASCADING DELETE)
      */
     async delete(id: string): Promise<void> {
-        // 1. Delete Daily Slots (Schedule)
-        await deleteCollectionBySeason('daily_slots', id);
+        // 1. Delete Monthly Slots
+        await deleteCollectionBySeason('monthly_slots', id);
 
-        // 2. Delete Students
+        // 2. Delete Schedule Templates
+        await deleteCollectionBySeason('schedule_templates', id);
+
+        // 3. Delete Packages
+        await deleteCollectionBySeason('packages', id);
+
+        // 4. Delete Students
         await deleteCollectionBySeason('students', id);
 
-        // 3. Delete the Season itself
+        // 5. Delete the Season itself
         const docRef = doc(db, SEASONS_COLLECTION, id);
         await deleteDoc(docRef);
 
@@ -218,12 +248,25 @@ export const seasonService = {
             orderBy('startMonth', 'desc')
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
-            ...doc.data(),
-            id: doc.id,
-            createdAt: doc.data().createdAt?.toDate() || new Date(),
-            updatedAt: doc.data().updatedAt?.toDate() || new Date()
-        } as Season));
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            const startMonth = data.startMonth || '2025-01';
+            const endMonth = data.endMonth || '2025-02';
+
+            // Calculate start and end dates
+            const startDate = `${startMonth}-01`;
+            const [endYear, endMonthNum] = endMonth.split('-').map(Number);
+            const endDate = new Date(endYear, endMonthNum, 0).toISOString().split('T')[0];
+
+            return {
+                ...data,
+                id: doc.id,
+                startDate,
+                endDate,
+                createdAt: data.createdAt?.toDate() || new Date(),
+                updatedAt: data.updatedAt?.toDate() || new Date()
+            } as Season;
+        });
     },
 
     /**

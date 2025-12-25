@@ -133,8 +133,15 @@ export const packageValidationService = {
 
             const availablePackages = await this.getAvailablePackages(seasonId, categoryId);
 
+            // Calculate season end date from endMonth (last day of the month)
+            const [year, month] = season.endMonth.split('-').map(Number);
+            // creating date with day=0 gives the last day of the previous month
+            // so we use month (which is 1-based index from split) directly as the month index (which is 0-based for Date)
+            // e.g. "2026-02" -> y=2026, m=2. new Date(2026, 2, 0) -> March 0th -> Feb 28th.
+            const seasonEndDate = new Date(year, month, 0);
+
             return availablePackages.filter(pkg =>
-                this.canCompleteBeforeSeasonEnd(pkg, classesPerWeek, season.endDate)
+                this.canCompleteBeforeSeasonEnd(pkg, classesPerWeek, seasonEndDate)
             );
         } catch (error) {
             console.error('Error getting completable packages:', error);

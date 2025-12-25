@@ -1,11 +1,26 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, RefreshCw, Search, CheckCircle, AlertCircle, DollarSign, Trash2 } from 'lucide-react';
-import { scheduleService } from '../services/schedule';
 import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { dateUtils } from '../utils/date';
 import { studentService } from '../services/students';
 import { useSeason } from '../contexts/SeasonContext';
-import type { DailySlot, Student, DayType } from '../types/db';
+import type { Student, DayType } from '../types/db';
+
+// Local interface to replace DailySlot
+interface VirtualSlot {
+    id: string;
+    date: string;
+    dayType?: DayType;
+    scheduleTemplateId?: string;
+    seasonId?: string;
+    categoryId?: string;
+    timeSlot?: string;
+    timeId?: string;
+    capacity: number;
+    attendeeIds: string[];
+    locks?: any[];
+    isBreak?: boolean;
+}
 
 export default function Schedule() {
     const { currentSeason } = useSeason();
@@ -14,13 +29,15 @@ export default function Schedule() {
     const getInitialDate = () => {
         const today = new Date();
         if (currentSeason) {
-            const seasonStart = new Date(currentSeason.startDate);
+            // Parse startMonth (YYYY-MM) to Date
+            const [year, month] = currentSeason.startMonth.split('-').map(Number);
+            const seasonStart = new Date(year, month - 1, 1);
             // Reset hours to compare dates only
             today.setHours(0, 0, 0, 0);
             seasonStart.setHours(0, 0, 0, 0);
 
             if (today < seasonStart) {
-                return new Date(currentSeason.startDate);
+                return new Date(year, month - 1, 1);
             }
         }
         return today;
@@ -32,12 +49,14 @@ export default function Schedule() {
     useEffect(() => {
         if (currentSeason) {
             const today = new Date();
-            const seasonStart = new Date(currentSeason.startDate);
+            // Parse startMonth (YYYY-MM) to Date
+            const [year, month] = currentSeason.startMonth.split('-').map(Number);
+            const seasonStart = new Date(year, month - 1, 1);
             today.setHours(0, 0, 0, 0);
             seasonStart.setHours(0, 0, 0, 0);
 
             if (today < seasonStart) {
-                setCurrentDate(new Date(currentSeason.startDate));
+                setCurrentDate(new Date(year, month - 1, 1));
             } else {
                 // Optional: Reset to today if switch back to a current season?
                 // For now, let's just respect the "if before season, jump to start" rule.
@@ -48,12 +67,12 @@ export default function Schedule() {
         }
     }, [currentSeason?.id]);
 
-    const [slots, setSlots] = useState<DailySlot[]>([]);
+    const [slots, setSlots] = useState<VirtualSlot[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
     // Modal State
     // Modal State
-    const [selectedSlot, setSelectedSlot] = useState<DailySlot | null>(null);
+    const [selectedSlot, setSelectedSlot] = useState<VirtualSlot | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
     const [searchTerm, setSearchTerm] = useState('');
@@ -90,18 +109,16 @@ export default function Schedule() {
 
         setLoading(true);
         try {
-            const startStr = dateUtils.formatDateId(weekDays[0]);
-            const endStr = dateUtils.formatDateId(weekDays[6]);
 
-            // Parallel fetch: existing slots, students, and templates
-            const [existingSlotsData, studentsData, templates] = await Promise.all([
-                scheduleService.getRangeSlots(startStr, endStr),
+
+            // Parallel fetch: students and templates (no more daily_slots)
+            const [studentsData, templates] = await Promise.all([
                 studentService.getAllActive(),
                 scheduleTemplateService.getBySeason(currentSeason.id)
             ]);
 
             // Generate virtual slots from templates for each day in the week
-            const generatedSlots: DailySlot[] = [];
+            const generatedSlots: VirtualSlot[] = [];
 
             const dayNamesShort = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'];
 
@@ -124,43 +141,22 @@ export default function Schedule() {
                         s.fixedSchedule?.some(fs => fs.dayId === dayName && fs.timeId === template.timeSlot)
                     ).map(s => s.id);
 
-                    // Check if this slot already exists in the database
-                    const existingSlot = existingSlotsData.find(s => s.id === slotId);
-
-                    if (existingSlot) {
-                        // MERGE attendees: Database attendees (manual bookings) + Fixed Enrollments
-                        // Use a Set to ensure uniqueness
-                        const allAttendeeIds = Array.from(new Set([
-                            ...(existingSlot.attendeeIds || []),
-                            ...fixedEnrollments
-                        ])).filter(id => studentsData.some(s => s.id === id));
-
-                        generatedSlots.push({
-                            ...existingSlot,
-                            attendeeIds: allAttendeeIds,
-                            capacity: template.capacity,
-                            categoryId: template.categoryId,
-                            isBreak: template.isBreak ?? false,
-                            timeSlot: template.timeSlot,
-                            dayType: template.dayType
-                        });
-                    } else {
-                        // Create virtual slot from template with dynamic attendees
-                        generatedSlots.push({
-                            id: slotId,
-                            date: dateStr,
-                            dayType: template.dayType,
-                            scheduleTemplateId: template.id,
-                            seasonId: currentSeason.id,
-                            categoryId: template.categoryId,
-                            timeSlot: template.timeSlot,
-                            timeId: template.timeSlot.replace(':', '-'),
-                            capacity: template.capacity,
-                            attendeeIds: fixedEnrollments,
-                            locks: [],
-                            isBreak: template.isBreak ?? false
-                        });
-                    }
+                    // Create virtual slot from template with dynamic attendees
+                    // Note: No more database daily_slots, all slots are virtual now
+                    generatedSlots.push({
+                        id: slotId,
+                        date: dateStr,
+                        dayType: template.dayType,
+                        scheduleTemplateId: template.id,
+                        seasonId: currentSeason.id,
+                        categoryId: template.categoryId,
+                        timeSlot: template.timeSlot,
+                        timeId: template.timeSlot.replace(':', '-'),
+                        capacity: template.capacity,
+                        attendeeIds: fixedEnrollments,
+                        locks: [],
+                        isBreak: template.isBreak ?? false
+                    });
                 });
             });
 
@@ -185,7 +181,7 @@ export default function Schedule() {
         setCurrentDate(newDate);
     };
 
-    const openBookingModal = (slot: DailySlot) => {
+    const openBookingModal = (slot: VirtualSlot) => {
         setSelectedSlot(slot);
         setSearchTerm('');
         setViewMode('list');
@@ -199,13 +195,10 @@ export default function Schedule() {
 
         setBookingLoading(true);
         try {
-            // Using "ADMIN_TEST" as placeholder for user ID until Auth is fully set
-            await scheduleService.confirmBooking(selectedSlot.id, student.id, selectedSlot);
-
-            // Refresh data
-            await loadData();
+            // TODO: Implement manual booking with monthly_slots system
+            // For now, just show a message
+            alert('La funcionalidad de reserva manual está temporalmente deshabilitada. Use el sistema de horarios mensuales.');
             setIsModalOpen(false);
-            // alert("Reserva exitosa");
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Error al reservar");
@@ -226,13 +219,8 @@ export default function Schedule() {
 
         setBookingLoading(true);
         try {
-            await scheduleService.cancelBooking(selectedSlot.id, student.id);
-            await loadData();
-            // Update the selected slot with new data
-            const updatedSlot = slots.find(s => s.id === selectedSlot.id);
-            if (updatedSlot) {
-                setSelectedSlot({ ...updatedSlot, attendeeIds: updatedSlot.attendeeIds.filter(id => id !== student.id) });
-            }
+            // TODO: Implement cancel booking with monthly_slots system
+            alert('La funcionalidad de cancelación está temporalmente deshabilitada. Use el sistema de horarios mensuales.');
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Error al cancelar reserva");
@@ -252,7 +240,7 @@ export default function Schedule() {
 
     // Derived state: Get unique time slots from loaded data
     const timeRows = Array.from(new Set(slots.map(s => s.timeSlot || s.timeId)))
-        .sort((a, b) => a.localeCompare(b))
+        .sort((a, b) => (a || '').localeCompare(b || ''))
         .map(timeId => {
             // Find a slot with this ID to get the label/details if needed
             const sample = slots.find(s => s.timeSlot === timeId || s.timeId === timeId);
@@ -322,7 +310,7 @@ export default function Schedule() {
                             timeRows.map(hour => (
                                 <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
                                     <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
-                                        {hour.label.split(' - ')[0]}
+                                        {hour.label?.split(' - ')[0] || hour.id}
                                     </div>
                                     {weekDays.map((day, i) => {
                                         const dateStr = dateUtils.formatDateId(day);
@@ -354,13 +342,13 @@ export default function Schedule() {
                                                 <button
                                                     onClick={() => openBookingModal(slot)}
                                                     className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${hasDebtor
-                                                            ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
-                                                            : colorClass
+                                                        ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
+                                                        : colorClass
                                                         }`}
                                                 >
                                                     <div className="flex items-center justify-between w-full">
                                                         <span className={`text-[10px] font-bold opacity-70 ${hasDebtor ? 'text-orange-900' : ''}`}>
-                                                            {hour.label.split(' - ')[0]}
+                                                            {hour.label?.split(' - ')[0] || hour.id}
                                                         </span>
                                                         {isFull && !hasDebtor && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
                                                         {hasDebtor && <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>}
@@ -396,7 +384,7 @@ export default function Schedule() {
                             <div>
                                 <h3 className="font-bold text-slate-800">Reservar Clase</h3>
                                 <p className="text-sm text-slate-500">
-                                    {selectedSlot.timeId} • {typeof selectedSlot.date === 'string' ? selectedSlot.date : selectedSlot.date.toLocaleDateString('es-PE')}
+                                    {selectedSlot.timeId} • {selectedSlot.date}
                                 </p>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>

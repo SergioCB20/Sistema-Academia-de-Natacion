@@ -33,7 +33,12 @@ export default function SeasonSetup() {
                     start: formData.workingHoursStart,
                     end: formData.workingHoursEnd
                 },
-                isActive: true // First season is automatically active
+                isActive: true, // First season is automatically active
+                startDate: `${formData.startMonth}-01`,
+                endDate: (() => {
+                    const [y, m] = formData.endMonth.split('-').map(Number);
+                    return new Date(y, m, 0).toISOString().split('T')[0];
+                })()
             });
 
             // Refresh season context

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     User,
@@ -15,7 +15,8 @@ import {
     DollarSign,
     Printer,
     Clock,
-    AlertCircle
+    AlertCircle,
+    AlertTriangle
 } from 'lucide-react';
 import { studentService } from '../services/students';
 import { categoryService } from '../services/categoryService';
@@ -23,6 +24,7 @@ import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { paymentMethodService } from '../services/paymentMethodService';
 import { seasonService } from '../services/seasonService';
 import { packageValidationService } from '../services/packageValidation';
+import { calculateRealRemaining } from '../utils/studentUtils';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplate, PaymentMethodConfig } from '../types/db';
 
@@ -31,6 +33,7 @@ export default function Students() {
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const isSubmittingRef = useRef(false);
 
     // Dynamic Data from DB
     const [categories, setCategories] = useState<Category[]>([]);
@@ -333,7 +336,8 @@ export default function Students() {
             return;
         }
 
-        if (isSaving) return;
+        if (isSubmittingRef.current || isSaving) return;
+        isSubmittingRef.current = true;
         setIsSaving(true);
         try {
             if (editingStudent) {
@@ -386,6 +390,7 @@ export default function Students() {
             alert(error.message || "Error al guardar");
         } finally {
             setIsSaving(false);
+            isSubmittingRef.current = false;
         }
     };
 
@@ -531,6 +536,19 @@ export default function Students() {
                 alert("El nombre es requerido.");
                 return;
             }
+
+            // Check for duplicate name (case insensitive, ignoring accents)
+            const normalize = (str: string) =>
+                str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+            const targetName = normalize(formData.fullName);
+            const isDuplicate = students.some(s => normalize(s.fullName) === targetName);
+
+            if (isDuplicate) {
+                if (!confirm(`El alumno "${formData.fullName}" ya parece estar registrado. ¿Desea continuar de todos modos?`)) {
+                    return;
+                }
+            }
             if (formData.dni && !/^\d{8}$/.test(formData.dni)) {
                 alert("El DNI debe tener 8 números exactos.");
                 return;
@@ -592,6 +610,8 @@ export default function Students() {
 
     const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
 
+    // Helper: Calculate elapsed classes for a student based on schedule and start date
+    // calculateRealRemaining is now imported from ../utils/studentUtils
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -682,14 +702,20 @@ export default function Students() {
                                 <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
                                     <Phone className="w-4 h-4" />
                                     <span>{student.phone}</span>
+                                    <span>{student.phone}</span>
                                 </div>
+                                {student.studentCode && (
+                                    <div className="flex items-center gap-2 text-sm text-sky-600 font-mono mb-4 bg-sky-50 px-2 py-1 rounded w-fit">
+                                        <span className="font-bold">#{student.studentCode}</span>
+                                    </div>
+                                )}
 
                                 <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${student.remainingCredits > 0
+                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${calculateRealRemaining(student) > 0
                                         ? 'bg-emerald-100 text-emerald-700'
                                         : 'bg-slate-100 text-slate-500'
                                         }`}>
-                                        {student.remainingCredits} Clases
+                                        {calculateRealRemaining(student)} Clases
                                     </span>
 
                                     <button
@@ -739,9 +765,34 @@ export default function Students() {
                                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Datos Personales</h4>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo *</label>
-                                        <input required type="text" className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                            value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value })}
-                                        />
+                                        <div className="relative">
+                                            <input required type="text" className={`w-full px-4 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-sky-500/50 uppercase ${(() => {
+                                                if (!formData.fullName) return 'border-slate-200';
+                                                const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                const target = normalize(formData.fullName);
+                                                const isDup = students.some(s => normalize(s.fullName) === target);
+                                                return isDup ? 'border-amber-400 bg-amber-50 text-amber-900 focus:border-amber-500 focus:ring-amber-200' : 'border-slate-200';
+                                            })()}`}
+                                                value={formData.fullName} onChange={e => setFormData({ ...formData, fullName: e.target.value.toUpperCase() })}
+                                            />
+                                            {(() => {
+                                                if (!formData.fullName) return null;
+                                                const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                const target = normalize(formData.fullName);
+                                                const isDup = students.some(s => normalize(s.fullName) === target);
+                                                if (isDup) {
+                                                    return (
+                                                        <div className="absolute right-3 top-2.5 group">
+                                                            <AlertTriangle className="w-5 h-5 text-amber-500 animate-pulse" />
+                                                            <div className="absolute right-0 w-48 p-2 bg-amber-100 text-amber-800 text-xs rounded-lg shadow-lg border border-amber-200 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -top-10">
+                                                                Nombre ya registrado (posible duplicado)
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Edad *</label>

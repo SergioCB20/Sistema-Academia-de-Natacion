@@ -26,6 +26,8 @@ export interface Season {
         end: string; // "21:30"
     };
     isActive: boolean;
+    startDate: string; // "YYYY-MM-DD" (Calculated)
+    endDate: string; // "YYYY-MM-DD" (Calculated)
     createdAt: Date;
     updatedAt: Date;
 }
@@ -133,30 +135,7 @@ export interface ScheduleRule {
     allowedAges: number[]; // [16, 17, ...]
 }
 
-// --- GRUPO B: OPERACIÓN DIARIA ---
-export interface SlotLock {
-    studentId: string;
-    tempName?: string; // For walk-ins or unconfirmed users
-    expiresAt: number; // Timestamp ms
-}
 
-export interface DailySlot {
-    id: string; // "2025-01-20_10-11"
-    date: string | Date; // "2025-01-20" or Date object
-    timeId: string; // "10-11"
-    dayType?: DayType; // "lun-mier-vier", "mar-juev", "sab-dom" (from schedule template)
-    scheduleTemplateId?: string; // Reference to ScheduleTemplate (new system)
-    seasonId?: string; // Reference to Season (new system)
-    categoryId?: string; // Reference to Category (new system)
-    timeSlot?: string; // "06:00-07:00" (new system)
-    capacity: number;
-    attendeeIds: string[]; // Array of student IDs
-    attendeesDeducted?: string[]; // Array of student IDs who have been charged/deducted
-    locks: SlotLock[];
-    isBreak?: boolean; // For rest periods
-    createdAt?: Date;
-    updatedAt?: Date;
-}
 
 // --- GRUPO C: ENTIDADES DE NEGOCIO ---
 export interface PackageHistory {
@@ -187,6 +166,7 @@ export interface Student {
     createdAt: number; // Timestamp
     birthDate?: string | null; // YYYY-MM-DD (optional)
     age?: number | null; // Manual age override
+    studentCode?: string; // Auto-incremental code e.g. "00001"
 }
 
 export interface AppUser {
@@ -243,3 +223,11 @@ export interface UserProfile {
     role: UserRole;
     displayName?: string;
 }
+
+// Metadata for counters (to avoid counting all docs)
+export interface MetadataCounters {
+    students: number;
+    activeStudents: number; // Count of active students only
+    lastUpdated: Date;
+}
+
