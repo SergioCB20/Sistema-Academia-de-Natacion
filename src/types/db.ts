@@ -215,7 +215,7 @@ export interface SystemLog {
     metadata?: any;
 }
 
-export type UserRole = 'ADMIN' | 'USER';
+export type UserRole = 'SUPERADMIN' | 'ADMIN' | 'STAFF';
 
 export interface UserProfile {
     uid: string;

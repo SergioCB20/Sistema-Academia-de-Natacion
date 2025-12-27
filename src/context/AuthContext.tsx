@@ -39,8 +39,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         // Create default user profile if not exists
                         // IMPORTANT: For first admin, we might need to manually set in DB, 
                         // or checking a specific email.
-                        // For now, default to USER.
-                        const newRole: UserRole = 'USER';
+                        // For now, default to STAFF (lowest access).
+                        const newRole: UserRole = 'STAFF';
                         await setDoc(userRef, {
                             uid: user.uid,
                             email: user.email,
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     }
                 } catch (error) {
                     console.error("Error fetching user role:", error);
-                    setRole('USER');
+                    setRole('STAFF');
                 }
             } else {
                 setRole(null);

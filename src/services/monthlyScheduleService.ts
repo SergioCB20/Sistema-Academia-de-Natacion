@@ -484,6 +484,14 @@ export const monthlyScheduleService = {
             };
         }
 
+        // Fetch active students to filter orphaned enrollments
+        const studentsQuery = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('active', '==', true)
+        );
+        const studentsSnapshot = await getDocs(studentsQuery);
+        const activeStudentIds = new Set(studentsSnapshot.docs.map(doc => doc.id));
+
         // Get capacity from first slot logic needs to be smarter
         // Find the slot corresponding to "Current Month" or the first available future slot
         const { formatMonthId } = await import('../utils/monthUtils');
@@ -511,7 +519,13 @@ export const monthlyScheduleService = {
         }
 
         const totalCapacity = relevantSlot.capacity || 0;
-        const currentEnrollment = relevantSlot.enrolledStudents?.length || 0;
+
+        // Filter out orphaned enrollments (students that no longer exist)
+        const validEnrollments = (relevantSlot.enrolledStudents || []).filter(
+            (e: any) => activeStudentIds.has(e.studentId)
+        );
+        const currentEnrollment = validEnrollments.length;
+
         const isFull = currentEnrollment >= totalCapacity;
         const available = Math.max(0, totalCapacity - currentEnrollment);
 
@@ -526,9 +540,8 @@ export const monthlyScheduleService = {
         if (isFull) {
             // 1. Check earliest end date (+1 day) in the CURRENT (relevant) slot
             let earliestDropOffDate: Date | null = null;
-            const enrolled = relevantSlot.enrolledStudents || [];
 
-            enrolled.forEach((enrollment: any) => {
+            validEnrollments.forEach((enrollment: any) => {
                 const endDate = enrollment.endsAt?.toDate
                     ? enrollment.endsAt.toDate()
                     : new Date(enrollment.endsAt);
@@ -542,8 +555,14 @@ export const monthlyScheduleService = {
                 }
             });
 
-            // 2. Check if there is a future month that is NOT full
-            const futureFreeSlot = slots.find(s => s.month > relevantSlot!.month && (s.enrolledStudents?.length || 0) < s.capacity);
+            // 2. Check if there is a future month that is NOT full (also filtering orphaned)
+            const futureFreeSlot = slots.find(s => {
+                if (s.month <= relevantSlot!.month) return false;
+                const validCount = (s.enrolledStudents || []).filter(
+                    (e: any) => activeStudentIds.has(e.studentId)
+                ).length;
+                return validCount < s.capacity;
+            });
             let futureSlotStartDate: Date | null = null;
 
             if (futureFreeSlot) {

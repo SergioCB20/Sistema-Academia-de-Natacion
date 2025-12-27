@@ -23,8 +23,17 @@ export default function ProtectedRoute({ children, allowedRoles }: Props) {
     }
 
     if (allowedRoles && role && !allowedRoles.includes(role)) {
-        // Redirect to a default page for non-admin, e.g. Students
-        return <Navigate to="/alumnos" replace />;
+        // Redirect based on user's role to their allowed default page
+        // SUPERADMIN -> Panel (/)
+        // ADMIN -> Horarios (/horarios) 
+        // STAFF -> Horarios (/horarios)
+        const defaultPages: Record<string, string> = {
+            'SUPERADMIN': '/',
+            'ADMIN': '/horarios',
+            'STAFF': '/horarios'
+        };
+        const redirectTo = defaultPages[role] || '/horarios';
+        return <Navigate to={redirectTo} replace />;
     }
 
     return <>{children}</>;

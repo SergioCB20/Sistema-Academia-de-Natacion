@@ -36,42 +36,46 @@ function App() {
               </ProtectedRoute>
             }>
               <Route index element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Dashboard />
                 </ProtectedRoute>
               } />
               <Route path="alumnos" element={<Students />} />
               <Route path="horarios" element={<MonthlySchedule />} />
               <Route path="caja" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Finance />
                 </ProtectedRoute>
               } />
-              <Route path="carnet" element={<IDCard />} />
+              <Route path="carnet" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN', 'ADMIN']}>
+                  <IDCard />
+                </ProtectedRoute>
+              } />
 
-              {/* Admin Routes */}
+              {/* Admin Routes - SUPERADMIN only */}
               <Route path="admin/categorias" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Categories />
                 </ProtectedRoute>
               } />
               <Route path="admin/temporadas" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Seasons />
                 </ProtectedRoute>
               } />
               <Route path="admin/paquetes" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Packages />
                 </ProtectedRoute>
               } />
               <Route path="admin/plantillas" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <ScheduleTemplates />
                 </ProtectedRoute>
               } />
               <Route path="admin/pagos" element={
-                <ProtectedRoute allowedRoles={['ADMIN']}>
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <PaymentMethods />
                 </ProtectedRoute>
               } />
