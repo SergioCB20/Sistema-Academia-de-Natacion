@@ -4,7 +4,7 @@ import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
 import { useSeason } from '../contexts/SeasonContext';
-import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth } from '../utils/monthUtils';
+import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth, parseMonthId } from '../utils/monthUtils';
 import { calculateRealRemaining } from '../utils/studentUtils';
 import type { MonthlySlot, MonthlyEnrollment, Student, Category } from '../types/db';
 
@@ -145,6 +145,61 @@ export default function MonthlySchedule() {
         s.dni.includes(searchTerm)
     );
 
+    // Calculate "Occupied Seats" based on peak concurrency
+    const calculateOccupiedSeats = (enrollments: MonthlyEnrollment[], slot: MonthlySlot) => {
+        if (!enrollments || enrollments.length === 0) return 0;
+
+        // Use the month of the slot to filter
+        const slotMonthDate = parseMonthId(slot.month);
+        const slotStart = slotMonthDate.getTime();
+        // End of month
+        const slotEnd = new Date(slotMonthDate.getFullYear(), slotMonthDate.getMonth() + 1, 0, 23, 59, 59).getTime();
+
+        // Filter out orphaned enrollments (deleted students) 
+        // AND enrollments that don't overlap with THIS specific month
+        const validEnrollments = enrollments.filter(e => {
+            const hasStudent = students.some(s => s.id === e.studentId);
+            if (!hasStudent) return false;
+
+            const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
+            const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
+
+            // Overlap check
+            return start <= slotEnd && end >= slotStart;
+        });
+
+        if (validEnrollments.length === 0) return 0;
+
+        // Create events: +1 at start, -1 at end
+        const events: { time: number; type: number }[] = [];
+
+        validEnrollments.forEach(e => {
+            const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
+            let end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
+
+            if (end < start) end = start;
+
+            // Only count overlap within this month for concurrency calculation
+            const effectiveStart = Math.max(start, slotStart);
+            const effectiveEnd = Math.min(end, slotEnd);
+
+            events.push({ time: effectiveStart, type: 1 });
+            events.push({ time: effectiveEnd + 1, type: -1 });
+        });
+
+        events.sort((a, b) => a.time - b.time || a.type - b.type);
+
+        let maxOccupancy = 0;
+        let currentOccupancy = 0;
+
+        events.forEach(event => {
+            currentOccupancy += event.type;
+            if (currentOccupancy > maxOccupancy) maxOccupancy = currentOccupancy;
+        });
+
+        return maxOccupancy;
+    };
+
     const getStatusColor = (capacity: number, enrolled: number) => {
         const ratio = enrolled / capacity;
         if (ratio >= 1) return 'bg-red-50 text-red-700 border-red-200';
@@ -152,13 +207,14 @@ export default function MonthlySchedule() {
         return 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm';
     };
 
-    // Group slots by timeSlot and dayType
+    // Group slots by timeSlot and dayType (allowing multiple slots/categories per cell)
     const groupedSlots = slots.reduce((acc, slot) => {
         const key = slot.timeSlot;
         if (!acc[key]) acc[key] = {};
-        acc[key][slot.dayType] = slot;
+        if (!acc[key][slot.dayType]) acc[key][slot.dayType] = [];
+        (acc[key][slot.dayType] as any).push(slot);
         return acc;
-    }, {} as Record<string, Record<string, MonthlySlot>>);
+    }, {} as Record<string, Record<string, MonthlySlot[]>>);
 
     const timeSlots = Object.keys(groupedSlots).sort();
 
@@ -234,9 +290,9 @@ export default function MonthlySchedule() {
                                                 {timeSlot}
                                             </td>
                                             {(['lun-mier-vier', 'mar-juev', 'sab-dom'] as const).map(dayType => {
-                                                const slot = dayTypeSlots[dayType];
+                                                const slotsInCell = (dayTypeSlots?.[dayType] || []) as MonthlySlot[];
 
-                                                if (!slot) {
+                                                if (slotsInCell.length === 0) {
                                                     return (
                                                         <td key={dayType} className="px-6 py-4">
                                                             <div className="text-center text-slate-300 text-sm">—</div>
@@ -244,130 +300,75 @@ export default function MonthlySchedule() {
                                                     );
                                                 }
 
-                                                if (slot.isBreak) {
-                                                    return (
-                                                        <td key={dayType} className="px-6 py-4">
-                                                            <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 text-center">
-                                                                <span className="text-xs font-bold text-slate-500 uppercase">Descanso</span>
-                                                            </div>
-                                                        </td>
-                                                    );
-                                                }
-
-                                                const category = categories.find(c => c.id === slot.categoryId);
-
-                                                // Calculate "Occupied Seats" based on peak concurrency
-                                                // If we have spot recycling (Student A leaves Jan 8, B starts Jan 10), 
-                                                // we have 4 enrollments but only 3 seats occupied.
-                                                // IMPORTANT: Only count enrollments where the student still exists (not deleted)
-                                                const calculateOccupiedSeats = (enrollments: MonthlyEnrollment[]) => {
-                                                    if (!enrollments || enrollments.length === 0) return 0;
-
-                                                    // Filter out orphaned enrollments (deleted students)
-                                                    const validEnrollments = enrollments.filter(e =>
-                                                        students.some(s => s.id === e.studentId)
-                                                    );
-
-                                                    if (validEnrollments.length === 0) return 0;
-
-                                                    // Create events: +1 at start, -1 at end
-                                                    const events: { time: number; type: number }[] = [];
-
-                                                    validEnrollments.forEach(e => {
-                                                        const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
-                                                        let end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
-
-                                                        // Ensure end is after start (sanity check)
-                                                        if (end < start) end = start;
-
-                                                        events.push({ time: start, type: 1 });
-                                                        // Add a small buffer to end time to avoid adjacent-day overlap false positives?
-                                                        // Actually, if A ends Jan 8 (23:59?), and B starts Jan 9 (00:00).
-                                                        // If we just use raw timestamps, they might not overlap. 
-                                                        // But safely, let's treat end as exclusive? 
-                                                        // Usually endsAt is end of day. 
-                                                        // If A ends Jan 8, slot is free Jan 9.
-                                                        // Start Jan 10 is fine.
-                                                        // Let's use simple logic: +1 at start, -1 AFTER end.
-                                                        events.push({ time: end + 1, type: -1 });
-                                                    });
-
-                                                    events.sort((a, b) => a.time - b.time || a.type - b.type); // Process starts before ends if time matches? No, process ends before starts?
-                                                    // If A ends at T, and B starts at T. 
-                                                    // If we process End (-1) first, count drops, then Start (+1), count rises. Peak is N.
-                                                    // If start (+1) first, peak is N+1.
-                                                    // If A ends Jan 8 (day), usually effectively 23:59.
-                                                    // B starts Jan 9 (00:00). Timestamps differ.
-                                                    // So sorting by time is sufficient.
-
-                                                    let maxOccupancy = 0;
-                                                    let currentOccupancy = 0;
-
-                                                    events.forEach(event => {
-                                                        currentOccupancy += event.type;
-                                                        if (currentOccupancy > maxOccupancy) maxOccupancy = currentOccupancy;
-                                                    });
-
-                                                    return maxOccupancy;
-                                                };
-
-
-                                                const occupiedSeats = calculateOccupiedSeats(slot.enrolledStudents || []);
-
-                                                // Check for debtors in enrolled students
-                                                const hasDebtor = slot.enrolledStudents?.some(enrollment => {
-                                                    const student = students.find(s => s.id === enrollment.studentId);
-                                                    return student?.hasDebt;
-                                                });
-
-                                                const available = slot.capacity - occupiedSeats;
-                                                const colorClass = getStatusColor(slot.capacity, occupiedSeats);
-
                                                 return (
                                                     <td key={dayType} className="px-6 py-4">
-                                                        <button
-                                                            onClick={() => openModal(slot)}
-                                                            className={`w-full rounded-lg border p-3 transition-all ${hasDebtor
-                                                                ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 shadow-sm'
-                                                                : `${colorClass} hover:shadow-md`
-                                                                }`}
-                                                        >
-                                                            <div className="flex flex-col gap-2">
-                                                                <div className="flex items-center justify-between">
-                                                                    <span className={`text-xs font-bold ${hasDebtor ? 'text-orange-900' : ''}`}>
-                                                                        {category?.name || 'Sin categoría'}
-                                                                    </span>
-                                                                    {occupiedSeats >= slot.capacity && !hasDebtor && (
-                                                                        <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">LLENO</span>
-                                                                    )}
-                                                                    {hasDebtor && (
-                                                                        <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex items-center justify-between">
-                                                                    <div className="flex items-center gap-1">
-                                                                        {hasDebtor ? (
-                                                                            <div className="flex items-center gap-1 text-orange-700">
-                                                                                <Users className="w-3 h-3" />
-                                                                                <span className="text-xs font-mono font-bold">
-                                                                                    {occupiedSeats}/{slot.capacity}
+                                                        <div className="flex flex-col gap-2">
+                                                            {slotsInCell.map((slot) => {
+                                                                if (slot.isBreak) {
+                                                                    return (
+                                                                        <div key={slot.id} className="bg-slate-100 border border-slate-200 rounded-lg p-3 text-center">
+                                                                            <span className="text-xs font-bold text-slate-500 uppercase">Descanso</span>
+                                                                        </div>
+                                                                    );
+                                                                }
+
+                                                                const category = categories.find(c => c.id === slot.categoryId);
+                                                                const occupiedSeats = calculateOccupiedSeats(slot.enrolledStudents || [], slot);
+                                                                const hasDebtor = slot.enrolledStudents?.some(enrollment => {
+                                                                    const student = students.find(s => s.id === enrollment.studentId);
+                                                                    return student?.hasDebt;
+                                                                });
+                                                                const available = slot.capacity - occupiedSeats;
+                                                                const colorClass = getStatusColor(slot.capacity, occupiedSeats);
+
+                                                                return (
+                                                                    <button
+                                                                        key={slot.id}
+                                                                        onClick={() => openModal(slot)}
+                                                                        className={`w-full rounded-lg border p-3 transition-all ${hasDebtor
+                                                                            ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 shadow-sm'
+                                                                            : `${colorClass} hover:shadow-md`
+                                                                            }`}
+                                                                    >
+                                                                        <div className="flex flex-col gap-2">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className={`text-xs font-bold ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                                    {category?.name || 'Sin categoría'}
+                                                                                </span>
+                                                                                {occupiedSeats >= slot.capacity && !hasDebtor && (
+                                                                                    <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">LLENO</span>
+                                                                                )}
+                                                                                {hasDebtor && (
+                                                                                    <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="flex items-center justify-between">
+                                                                                <div className="flex items-center gap-1">
+                                                                                    {hasDebtor ? (
+                                                                                        <div className="flex items-center gap-1 text-orange-700">
+                                                                                            <Users className="w-3 h-3" />
+                                                                                            <span className="text-xs font-mono font-bold">
+                                                                                                {occupiedSeats}/{slot.capacity}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <div className="flex items-center gap-1">
+                                                                                            <Users className="w-3 h-3" />
+                                                                                            <span className="text-xs font-mono font-bold">
+                                                                                                {occupiedSeats}/{slot.capacity}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                                <span className={`text-[10px] font-medium ${hasDebtor ? 'text-orange-800/70' : 'opacity-70'}`}>
+                                                                                    {available} disponible{available !== 1 ? 's' : ''}
                                                                                 </span>
                                                                             </div>
-                                                                        ) : (
-                                                                            <div className="flex items-center gap-1">
-                                                                                <Users className="w-3 h-3" />
-                                                                                <span className="text-xs font-mono font-bold">
-                                                                                    {occupiedSeats}/{slot.capacity}
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <span className={`text-[10px] font-medium ${hasDebtor ? 'text-orange-800/70' : 'opacity-70'}`}>
-                                                                        {available} disponible{available !== 1 ? 's' : ''}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </button>
+                                                                        </div>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </td>
                                                 );
                                             })}
@@ -402,8 +403,20 @@ export default function MonthlySchedule() {
 
                         {/* Filter out orphaned enrollments (deleted students) */}
                         {(() => {
+                            const slotMonthDate = parseMonthId(selectedSlot.month);
+                            const slotStart = slotMonthDate.getTime();
+                            const slotEnd = new Date(slotMonthDate.getFullYear(), slotMonthDate.getMonth() + 1, 0, 23, 59, 59).getTime();
+
                             const validEnrollments = (selectedSlot.enrolledStudents || []).filter(
-                                (e: MonthlyEnrollment) => students.some(s => s.id === e.studentId)
+                                (e: MonthlyEnrollment) => {
+                                    const hasStudent = students.some(s => s.id === e.studentId);
+                                    if (!hasStudent) return false;
+
+                                    const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
+                                    const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
+
+                                    return start <= slotEnd && end >= slotStart;
+                                }
                             );
                             const validCount = validEnrollments.length;
                             const availableSlots = selectedSlot.capacity - validCount;
