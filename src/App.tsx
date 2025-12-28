@@ -17,6 +17,7 @@ import Seasons from './pages/admin/Seasons';
 import Packages from './pages/admin/Packages';
 import ScheduleTemplates from './pages/admin/ScheduleTemplates';
 import PaymentMethods from './pages/admin/PaymentMethods';
+import MassImport from './pages/admin/MassImport';
 
 function App() {
   return (
@@ -77,6 +78,11 @@ function App() {
               <Route path="admin/pagos" element={
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <PaymentMethods />
+                </ProtectedRoute>
+              } />
+              <Route path="admin/importar" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
+                  <MassImport />
                 </ProtectedRoute>
               } />
             </Route>
