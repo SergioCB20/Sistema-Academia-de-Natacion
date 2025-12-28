@@ -231,3 +231,37 @@ export interface MetadataCounters {
     lastUpdated: Date;
 }
 
+// --- CARD CONFIGURATION ---
+export interface CardFieldConfig {
+    top?: string;    // e.g., "20mm"
+    bottom?: string; // e.g., "10mm"
+    left?: string;   // e.g., "15mm"
+    right?: string;  // e.g., "25mm"
+    fontSize: string; // e.g., "8pt"
+}
+
+export interface CardConfig {
+    id: string;
+    width: string;  // e.g., "99mm"
+    height: string; // e.g., "69mm"
+    printMargins: {
+        top: string;    // e.g., "0mm"
+        right: string;  // e.g., "45mm"
+        bottom: string; // e.g., "0mm"
+        left: string;   // e.g., "58mm"
+    };
+    fields: {
+        nombre: CardFieldConfig;
+        codigo: CardFieldConfig;
+        edad: CardFieldConfig;
+        categoria: CardFieldConfig;
+        horarioTime: CardFieldConfig;
+        horarioDays: CardFieldConfig;
+        fechaInicio: CardFieldConfig;
+        fechaFinal: CardFieldConfig;
+        clases: CardFieldConfig;
+    };
+    createdAt: number;
+    updatedAt: number;
+}
+

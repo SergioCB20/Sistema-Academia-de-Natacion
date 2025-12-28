@@ -18,6 +18,7 @@ import Packages from './pages/admin/Packages';
 import ScheduleTemplates from './pages/admin/ScheduleTemplates';
 import PaymentMethods from './pages/admin/PaymentMethods';
 import MassImport from './pages/admin/MassImport';
+import CardSettings from './pages/admin/CardSettings';
 
 function App() {
   return (
@@ -83,6 +84,9 @@ function App() {
               <Route path="admin/importar" element={
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <MassImport />
+              <Route path="admin/carnet-config" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
+                  <CardSettings />
                 </ProtectedRoute>
               } />
             </Route>

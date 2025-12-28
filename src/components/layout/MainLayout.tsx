@@ -37,6 +37,7 @@ export default function MainLayout() {
         { to: '/admin/paquetes', icon: DollarSign, label: 'Paquetes' },
         { to: '/admin/plantillas', icon: Settings, label: 'Plantilla de Horario' },
         { to: '/admin/pagos', icon: Wallet, label: 'Métodos de Pago' },
+        { to: '/admin/carnet-config', icon: CreditCard, label: 'Configurar Carnet' },
     ];
 
     const filteredNavItems = navItems.filter(item =>
