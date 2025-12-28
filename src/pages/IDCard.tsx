@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, Printer, X } from 'lucide-react';
 import { studentService } from '../services/students';
-import type { Student } from '../types/db';
+import { cardConfigService } from '../services/cardConfig';
+import { categoryService } from '../services/categoryService';
+import type { Student, CardConfig, Category } from '../types/db';
 
 export default function IDCard() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -11,11 +13,30 @@ export default function IDCard() {
     const [students, setStudents] = useState<Student[]>([]);
     const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+    const [cardConfig, setCardConfig] = useState<CardConfig | null>(null);
+    const [categories, setCategories] = useState<Category[]>([]);
 
     useEffect(() => {
         const init = async () => {
             const data = await studentService.getAllActive();
             setStudents(data);
+
+            // Load card configuration
+            const config = await cardConfigService.getConfig();
+            // Ensure printMargins exists for backward compatibility
+            if (!config.printMargins) {
+                config.printMargins = {
+                    top: '0mm',
+                    right: '45mm',
+                    bottom: '0mm',
+                    left: '58mm'
+                };
+            }
+            setCardConfig(config);
+
+            // Load categories
+            const cats = await categoryService.getAll();
+            setCategories(cats);
 
             // Auto-open if DNI in URL
             const dni = searchParams.get('dni');
@@ -43,6 +64,17 @@ export default function IDCard() {
         );
         setFilteredStudents(filtered);
     }, [searchTerm, students]);
+
+    const getCategoryName = (student: Student): string => {
+        if (!student.categoryId) return student.category || '-';
+        const cat = categories.find(c => c.id === student.categoryId);
+        return cat?.name || student.category || '-';
+    };
+
+    const formatStudentCode = (student: Student): string => {
+        const code = student.studentCode || student.dni || '0';
+        return code.padStart(8, '0');
+    };
 
     const calculateAge = (student: Student) => {
         if (student.age !== undefined && student.age !== null) return student.age;
@@ -74,7 +106,14 @@ export default function IDCard() {
         // We know timeId is like "06-07", let's format it loosely
         const cleanTime = (t: string) => {
             const [start, end] = t.split('-');
-            return `${start}:00 - ${end}:00`;
+            const formatHour = (hour: string) => {
+                const h = parseInt(hour);
+                if (h === 0) return '12:00am';
+                if (h < 12) return `${h}:00am`;
+                if (h === 12) return '12:00pm';
+                return `${h - 12}:00pm`;
+            };
+            return `${formatHour(start)} - ${formatHour(end)}`;
         };
 
         return { days: dayStr || '-', time: cleanTime(timeStr) || '-' };
@@ -82,20 +121,35 @@ export default function IDCard() {
 
     const formatDate = (ts: number | string) => {
         if (!ts) return '-';
-        // If string YYYY-MM-DD
-        if (typeof ts === 'string') {
-            const [y, m, d] = ts.split('-');
-            return `${d}/${m}/${y}`;
+
+        // If string in format YYYY-MMM-DD (e.g., "2026-Jan-29")
+        if (typeof ts === 'string' && ts.includes('-')) {
+            // Try to parse as Date first
+            const date = new Date(ts);
+            if (!isNaN(date.getTime())) {
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            }
         }
-        // If timestamp
-        return new Date(ts).toLocaleDateString('es-PE');
+
+        // If timestamp - format as DD/MM/YYYY
+        const date = new Date(ts);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
     };
 
     const getEndDate = (startDate: number) => {
         if (!startDate) return '-';
         const d = new Date(startDate);
         d.setDate(d.getDate() + 28);
-        return d.toLocaleDateString('es-PE');
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
     };
 
     const handlePrint = () => {
@@ -104,6 +158,19 @@ export default function IDCard() {
 
     return (
         <div className="space-y-6">
+            {/* Dynamic print margins */}
+            {cardConfig && (
+                <style>{`
+                    @page {
+                        margin-top: ${cardConfig.printMargins.top};
+                        margin-right: ${cardConfig.printMargins.right};
+                        margin-bottom: ${cardConfig.printMargins.bottom};
+                        margin-left: ${cardConfig.printMargins.left};
+                        size: A4;
+                    }
+                `}</style>
+            )}
+
             <div className="flex items-center justify-between no-print">
                 <h2 className="text-3xl font-bold text-slate-800">Búsqueda de Carnet</h2>
             </div>
@@ -174,104 +241,284 @@ export default function IDCard() {
                         </div>
 
                         <div className="p-4 bg-slate-100 flex justify-center overflow-auto">
-                            {/* VISUAL REPRESENTATION (Simulating the physical card background lightly) */}
-                            <div className="relative w-[500px] h-[290px] bg-sky-200 rounded-xl shadow-lg border border-sky-300 p-6 text-sky-900 overflow-hidden transform scale-95 origin-center">
-                                {/* Watermark / Logo placeholder */}
-                                <div className="absolute top-4 left-4 w-24 h-24 bg-sky-100/50 rounded-full blur-xl" />
+                            {/* PREVIEW - Matches physical card */}
+                            {cardConfig && (
+                                <div
+                                    className="relative bg-pink-200 border-2 border-pink-300 shadow-lg font-sans text-black font-bold"
+                                    style={{
+                                        width: cardConfig.width,
+                                        height: cardConfig.height,
+                                        transform: 'scale(1.2)'
+                                    }}
+                                >
+                                    {/* NOMBRE */}
+                                    <div
+                                        className="absolute uppercase leading-tight"
+                                        style={{
+                                            top: cardConfig.fields.nombre.top,
+                                            bottom: cardConfig.fields.nombre.bottom,
+                                            left: cardConfig.fields.nombre.left,
+                                            right: cardConfig.fields.nombre.right,
+                                            fontSize: cardConfig.fields.nombre.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.fullName}
+                                    </div>
 
-                                <div className="text-center mb-6">
-                                    <h2 className="text-xl font-extrabold uppercase tracking-widest text-sky-800">Academia de Natación Los Parrales</h2>
-                                    <p className="text-xs font-bold text-sky-700">Jr. Guardia Civil Norte Mz I Lt 6 Santiago de Surco</p>
+                                    {/* CÓDIGO */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.codigo.top,
+                                            bottom: cardConfig.fields.codigo.bottom,
+                                            left: cardConfig.fields.codigo.left,
+                                            right: cardConfig.fields.codigo.right,
+                                            fontSize: cardConfig.fields.codigo.fontSize,
+                                            textAlign: cardConfig.fields.codigo.right ? 'right' : 'left'
+                                        }}
+                                    >
+                                        {formatStudentCode(selectedStudent)}
+                                    </div>
+
+                                    {/* EDAD */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.edad.top,
+                                            bottom: cardConfig.fields.edad.bottom,
+                                            left: cardConfig.fields.edad.left,
+                                            right: cardConfig.fields.edad.right,
+                                            fontSize: cardConfig.fields.edad.fontSize
+                                        }}
+                                    >
+                                        {calculateAge(selectedStudent)} AÑOS
+                                    </div>
+
+                                    {/* CATEGORÍA */}
+                                    <div
+                                        className="absolute uppercase"
+                                        style={{
+                                            top: cardConfig.fields.categoria.top,
+                                            bottom: cardConfig.fields.categoria.bottom,
+                                            left: cardConfig.fields.categoria.left,
+                                            right: cardConfig.fields.categoria.right,
+                                            fontSize: cardConfig.fields.categoria.fontSize
+                                        }}
+                                    >
+                                        {getCategoryName(selectedStudent)}
+                                    </div>
+
+                                    {/* HORARIO (HORA) */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.horarioTime.top,
+                                            bottom: cardConfig.fields.horarioTime.bottom,
+                                            left: cardConfig.fields.horarioTime.left,
+                                            right: cardConfig.fields.horarioTime.right,
+                                            fontSize: cardConfig.fields.horarioTime.fontSize
+                                        }}
+                                    >
+                                        {formatSchedule(selectedStudent.fixedSchedule).time}
+                                    </div>
+
+                                    {/* HORARIO (DÍAS) */}
+                                    <div
+                                        className="absolute uppercase"
+                                        style={{
+                                            top: cardConfig.fields.horarioDays.top,
+                                            bottom: cardConfig.fields.horarioDays.bottom,
+                                            left: cardConfig.fields.horarioDays.left,
+                                            right: cardConfig.fields.horarioDays.right,
+                                            fontSize: cardConfig.fields.horarioDays.fontSize
+                                        }}
+                                    >
+                                        {formatSchedule(selectedStudent.fixedSchedule).days}
+                                    </div>
+
+                                    {/* FECHA INICIO */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.fechaInicio.top,
+                                            bottom: cardConfig.fields.fechaInicio.bottom,
+                                            left: cardConfig.fields.fechaInicio.left,
+                                            right: cardConfig.fields.fechaInicio.right,
+                                            fontSize: cardConfig.fields.fechaInicio.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.packageStartDate ? formatDate(selectedStudent.packageStartDate) : '-'}
+                                    </div>
+
+                                    {/* FECHA FINAL */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.fechaFinal.top,
+                                            bottom: cardConfig.fields.fechaFinal.bottom,
+                                            left: cardConfig.fields.fechaFinal.left,
+                                            right: cardConfig.fields.fechaFinal.right,
+                                            fontSize: cardConfig.fields.fechaFinal.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.packageEndDate ? formatDate(selectedStudent.packageEndDate) : '-'}
+                                    </div>
+
+                                    {/* CLASES */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.clases.top,
+                                            bottom: cardConfig.fields.clases.bottom,
+                                            left: cardConfig.fields.clases.left,
+                                            right: cardConfig.fields.clases.right,
+                                            fontSize: cardConfig.fields.clases.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.remainingCredits || 0}
+                                    </div>
                                 </div>
-
-                                <div className="grid grid-cols-[auto_1fr] gap-6 items-start">
-                                    {/* Left Column: Photo Area Placeholder */}
-                                    <div className="w-24 h-32 bg-sky-100/50 border-2 border-dashed border-sky-400 rounded-lg flex items-center justify-center">
-                                        <span className="text-xs text-sky-500 font-bold">FOTO</span>
-                                    </div>
-
-                                    {/* Right Column: Details */}
-                                    <div className="space-y-2 text-sm font-bold">
-                                        <div className="grid grid-cols-[100px_1fr]">
-                                            <span className="text-sky-700">ALUMNO:</span>
-                                            <span className="text-black uppercase text-lg leading-none">{selectedStudent.fullName}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[100px_1fr]">
-                                            <span className="text-sky-700">EDAD:</span>
-                                            <span className="text-black">{calculateAge(selectedStudent)} AÑOS</span>
-                                        </div>
-                                        <div className="grid grid-cols-[100px_1fr]">
-                                            <span className="text-sky-700">CATEGORÍA:</span>
-                                            <span className="text-black uppercase">{selectedStudent.category}</span>
-                                        </div>
-                                        <div className="grid grid-cols-[100px_1fr]">
-                                            <span className="text-sky-700">HORARIO:</span>
-                                            <div>
-                                                <div className="text-black">{formatSchedule(selectedStudent.fixedSchedule).days}</div>
-                                                <div className="text-black text-xs">{formatSchedule(selectedStudent.fixedSchedule).time}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="absolute bottom-6 left-8 right-8 flex justify-between text-xs font-bold border-t border-sky-400/30 pt-2">
-                                    <div>
-                                        <span className="text-sky-700 mr-2">INICIO:</span>
-                                        <span className="text-black">{formatDate(selectedStudent.createdAt)}</span>
-                                    </div>
-                                    <div>
-                                        <span className="text-sky-700 mr-2">FINAL:</span>
-                                        <span className="text-black">{getEndDate(selectedStudent.createdAt)}</span>
-                                    </div>
-                                    <div>
-                                        <span className="text-sky-700 mr-2">CÓDIGO:</span>
-                                        <span className="text-black">{selectedStudent.dni}</span>
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </div>
 
                         {/* PRINT ONLY SECTION - HIDDEN IN SCREEN, VISIBLE IN PRINT */}
                         <div className="hidden print:block print:fixed print:top-0 print:left-0 print:w-full print:h-full print:bg-white print:z-[100]">
-                            {/* Specific layout for the pre-printed card */}
-                            <div className="relative w-[85mm] h-[55mm] font-sans text-black text-[10pt] font-bold">
-                                {/* Positioning these absolute based on the provided image roughly */}
-                                {/* Name */}
-                                <div className="absolute top-[35%] left-[25%] uppercase leading-tight w-[60%]">
-                                    {selectedStudent.fullName}
-                                </div>
-                                {/* Age */}
-                                <div className="absolute top-[48%] left-[25%]">
-                                    {calculateAge(selectedStudent)} AÑOS
-                                </div>
-                                {/* Category */}
-                                <div className="absolute top-[56%] left-[25%]">
-                                    {selectedStudent.category}
-                                </div>
-                                {/* Schedule (Time) */}
-                                <div className="absolute top-[64%] left-[25%]">
-                                    {/* Example image shows: 01:00 p.m. - 02:00 p.m. */}
-                                    {/* My format: 06:00 - 07:00 */}
-                                    {formatSchedule(selectedStudent.fixedSchedule).time}
-                                </div>
-                                {/* Schedule (Days) */}
-                                <div className="absolute top-[72%] left-[25%]">
-                                    {/* Example image shows: Lun - Mie - Vie */}
-                                    {formatSchedule(selectedStudent.fixedSchedule).days}
-                                </div>
+                            {cardConfig && (
+                                <div
+                                    className="relative font-sans text-black font-bold"
+                                    style={{
+                                        width: cardConfig.width,
+                                        height: cardConfig.height
+                                    }}
+                                >
+                                    {/* NOMBRE */}
+                                    <div
+                                        className="absolute uppercase leading-tight"
+                                        style={{
+                                            top: cardConfig.fields.nombre.top,
+                                            bottom: cardConfig.fields.nombre.bottom,
+                                            left: cardConfig.fields.nombre.left,
+                                            right: cardConfig.fields.nombre.right,
+                                            fontSize: cardConfig.fields.nombre.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.fullName}
+                                    </div>
 
-                                {/* Dates Footer */}
-                                <div className="absolute bottom-[18%] left-[25%] flex gap-8 text-[9pt]">
-                                    <span>{formatDate(selectedStudent.createdAt)}</span>
-                                    {/* Gap for "Final:" label space on card */}
-                                    <span className="ml-12">{/* Final Date if needed? Image has blank boxes */} </span>
-                                </div>
+                                    {/* CÓDIGO */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.codigo.top,
+                                            bottom: cardConfig.fields.codigo.bottom,
+                                            left: cardConfig.fields.codigo.left,
+                                            right: cardConfig.fields.codigo.right,
+                                            fontSize: cardConfig.fields.codigo.fontSize,
+                                            textAlign: cardConfig.fields.codigo.right ? 'right' : 'left'
+                                        }}
+                                    >
+                                        {formatStudentCode(selectedStudent)}
+                                    </div>
 
-                                {/* Code top right */}
-                                <div className="absolute top-[45%] right-[5%] text-right">
-                                    {selectedStudent.dni}
+                                    {/* EDAD */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.edad.top,
+                                            bottom: cardConfig.fields.edad.bottom,
+                                            left: cardConfig.fields.edad.left,
+                                            right: cardConfig.fields.edad.right,
+                                            fontSize: cardConfig.fields.edad.fontSize
+                                        }}
+                                    >
+                                        {calculateAge(selectedStudent)} AÑOS
+                                    </div>
+
+                                    {/* CATEGORÍA */}
+                                    <div
+                                        className="absolute uppercase"
+                                        style={{
+                                            top: cardConfig.fields.categoria.top,
+                                            bottom: cardConfig.fields.categoria.bottom,
+                                            left: cardConfig.fields.categoria.left,
+                                            right: cardConfig.fields.categoria.right,
+                                            fontSize: cardConfig.fields.categoria.fontSize
+                                        }}
+                                    >
+                                        {getCategoryName(selectedStudent)}
+                                    </div>
+
+                                    {/* HORARIO (HORA) */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.horarioTime.top,
+                                            bottom: cardConfig.fields.horarioTime.bottom,
+                                            left: cardConfig.fields.horarioTime.left,
+                                            right: cardConfig.fields.horarioTime.right,
+                                            fontSize: cardConfig.fields.horarioTime.fontSize
+                                        }}
+                                    >
+                                        {formatSchedule(selectedStudent.fixedSchedule).time}
+                                    </div>
+
+                                    {/* HORARIO (DÍAS) */}
+                                    <div
+                                        className="absolute uppercase"
+                                        style={{
+                                            top: cardConfig.fields.horarioDays.top,
+                                            bottom: cardConfig.fields.horarioDays.bottom,
+                                            left: cardConfig.fields.horarioDays.left,
+                                            right: cardConfig.fields.horarioDays.right,
+                                            fontSize: cardConfig.fields.horarioDays.fontSize
+                                        }}
+                                    >
+                                        {formatSchedule(selectedStudent.fixedSchedule).days}
+                                    </div>
+
+                                    {/* FECHA INICIO */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.fechaInicio.top,
+                                            bottom: cardConfig.fields.fechaInicio.bottom,
+                                            left: cardConfig.fields.fechaInicio.left,
+                                            right: cardConfig.fields.fechaInicio.right,
+                                            fontSize: cardConfig.fields.fechaInicio.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.packageStartDate ? formatDate(selectedStudent.packageStartDate) : '-'}
+                                    </div>
+
+                                    {/* FECHA FINAL */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.fechaFinal.top,
+                                            bottom: cardConfig.fields.fechaFinal.bottom,
+                                            left: cardConfig.fields.fechaFinal.left,
+                                            right: cardConfig.fields.fechaFinal.right,
+                                            fontSize: cardConfig.fields.fechaFinal.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.packageEndDate ? formatDate(selectedStudent.packageEndDate) : '-'}
+                                    </div>
+
+                                    {/* CLASES */}
+                                    <div
+                                        className="absolute"
+                                        style={{
+                                            top: cardConfig.fields.clases.top,
+                                            bottom: cardConfig.fields.clases.bottom,
+                                            left: cardConfig.fields.clases.left,
+                                            right: cardConfig.fields.clases.right,
+                                            fontSize: cardConfig.fields.clases.fontSize
+                                        }}
+                                    >
+                                        {selectedStudent.remainingCredits || 0}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
 
                         <div className="p-6 border-t border-slate-100 flex justify-end gap-3 no-print">
@@ -283,9 +530,10 @@ export default function IDCard() {
                                 Imprimir Carnet
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
+                    </div >
+                </div >
+            )
+            }
 
             {/* Print Styles */}
             <style>{`
@@ -295,6 +543,6 @@ export default function IDCard() {
                     @page { size: auto; margin: 0; }
                 }
             `}</style>
-        </div>
+        </div >
     );
 }
