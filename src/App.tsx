@@ -84,6 +84,8 @@ function App() {
               <Route path="admin/importar" element={
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <MassImport />
+                </ProtectedRoute>
+              } />
               <Route path="admin/carnet-config" element={
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <CardSettings />

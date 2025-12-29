@@ -374,6 +374,7 @@ export function transformRow(
         packageEndDate,
         age: row.Edad_Al || null,
         createdAt: Date.now(),
+        asistencia: [], // Initialize empty attendance array
     };
 
     return {

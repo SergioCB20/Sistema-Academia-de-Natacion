@@ -142,7 +142,8 @@ export const studentService = {
                 remainingCredits: remainingCredits,
                 hasDebt: hasDebt,
                 studentCode: nextCode,
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                asistencia: [] // Initialize empty attendance array
             };
             transaction.set(studentRef, newStudent);
         });
@@ -737,6 +738,45 @@ export const studentService = {
         }
 
         return metadataDoc.data().activeStudents || 0;
+    },
+
+    /**
+     * Mark attendance for a student on a specific date
+     */
+    async markAttendance(
+        studentId: string,
+        fecha: string, // YYYY-MM-DD format
+        asistencia: boolean
+    ): Promise<void> {
+        const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+
+        await runTransaction(db, async (transaction) => {
+            const studentDoc = await transaction.get(studentRef);
+            if (!studentDoc.exists()) {
+                throw new Error("Estudiante no encontrado");
+            }
+
+            const studentData = studentDoc.data() as Student;
+            const currentAttendance = studentData.asistencia || [];
+
+            // Check if attendance for this date already exists
+            const existingIndex = currentAttendance.findIndex(a => a.fecha === fecha);
+
+            if (existingIndex >= 0) {
+                // Update existing record
+                currentAttendance[existingIndex] = { fecha, asistencia };
+            } else {
+                // Add new record
+                currentAttendance.push({ fecha, asistencia });
+            }
+
+            // Sort by date (newest first)
+            currentAttendance.sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+            transaction.update(studentRef, {
+                asistencia: currentAttendance
+            });
+        });
     }
 };
 

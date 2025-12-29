@@ -16,8 +16,10 @@ import {
     Printer,
     Clock,
     AlertCircle,
-    AlertTriangle
+    AlertTriangle,
+    Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { studentService } from '../services/students';
 import { categoryService } from '../services/categoryService';
 import { scheduleTemplateService } from '../services/scheduleTemplateService';
@@ -72,6 +74,14 @@ export default function Students() {
         credits: '1',
         amount: '',
         newEndDate: ''
+    });
+
+    // ATTENDANCE Modal State
+    const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
+    const [studentForAttendance, setStudentForAttendance] = useState<Student | null>(null);
+    const [attendanceData, setAttendanceData] = useState({
+        fecha: new Date().toISOString().split('T')[0], // Default to today
+        asistencia: true // Default to attended
     });
 
     // Form Data
@@ -501,6 +511,100 @@ export default function Students() {
         }
     }, [rechargeData.credits, studentForRecharge, isRechargeModalOpen]);
 
+    // ATTENDANCE HANDLERS
+    const handleOpenAttendance = (student: Student) => {
+        setStudentForAttendance(student);
+        setAttendanceData({
+            fecha: new Date().toISOString().split('T')[0], // Reset to today
+            asistencia: true // Default to attended
+        });
+        setIsAttendanceModalOpen(true);
+    };
+
+    const handleAttendanceSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!studentForAttendance) return;
+        if (isSaving) return;
+
+        setIsSaving(true);
+        try {
+            await studentService.markAttendance(
+                studentForAttendance.id,
+                attendanceData.fecha,
+                attendanceData.asistencia
+            );
+
+            setIsAttendanceModalOpen(false);
+            loadStudents(); // Reload to show updated attendance
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Error al marcar asistencia");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // EXPORT TO EXCEL HANDLER
+    const handleExportToExcel = () => {
+        try {
+            // Prepare data for export
+            const exportData = students.map(student => {
+                const category = getCategoryById(student.categoryId);
+
+                // Format schedule
+                let horario = '';
+                if (student.fixedSchedule && student.fixedSchedule.length > 0) {
+                    const days = Array.from(new Set(student.fixedSchedule.map(s => s.dayId))).join('-');
+                    const times = Array.from(new Set(student.fixedSchedule.map(s => s.timeId))).join(', ');
+                    horario = `${days} (${times})`;
+                }
+
+                // Count attendance (only "asistió" = true)
+                const asistenciaCount = student.asistencia
+                    ? student.asistencia.filter(a => a.asistencia === true).length
+                    : 0;
+
+                return {
+                    'Codigo': student.studentCode || '',
+                    'Nombre': student.fullName,
+                    'Telefono': student.phone || '',
+                    'Edad': student.age || '',
+                    'Categoria': category?.name || '',
+                    'Horario': horario,
+                    'Asistencia': asistenciaCount
+                };
+            });
+
+            // Create worksheet
+            const ws = XLSX.utils.json_to_sheet(exportData);
+
+            // Set column widths
+            ws['!cols'] = [
+                { wch: 10 }, // Codigo
+                { wch: 30 }, // Nombre
+                { wch: 12 }, // Telefono
+                { wch: 6 },  // Edad
+                { wch: 20 }, // Categoria
+                { wch: 30 }, // Horario
+                { wch: 10 }  // Asistencia
+            ];
+
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Alumnos');
+
+            // Generate filename with current date
+            const fecha = new Date().toISOString().split('T')[0];
+            const filename = `Alumnos_Backup_${fecha}.xlsx`;
+
+            // Download file
+            XLSX.writeFile(wb, filename);
+        } catch (error) {
+            console.error('Error exporting to Excel:', error);
+            alert('Error al exportar a Excel');
+        }
+    };
+
     // Get category from DB by ID
     const getCategoryById = (id: string): Category | undefined => {
         return categories.find(c => c.id === id);
@@ -623,13 +727,23 @@ export default function Students() {
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <h2 className="text-3xl font-bold text-slate-800">Alumnos</h2>
-                <button
-                    onClick={handleCreateNew}
-                    className="bg-slate-900 text-white px-4 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg shadow-slate-900/20"
-                >
-                    <Plus className="w-5 h-5" />
-                    Nuevo Alumno
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={handleExportToExcel}
+                        className="bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+                        title="Exportar a Excel"
+                    >
+                        <Download className="w-5 h-5" />
+                        Exportar Excel
+                    </button>
+                    <button
+                        onClick={handleCreateNew}
+                        className="bg-slate-900 text-white px-4 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg shadow-slate-900/20"
+                    >
+                        <Plus className="w-5 h-5" />
+                        Nuevo Alumno
+                    </button>
+                </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
@@ -724,13 +838,23 @@ export default function Students() {
                                         {calculateRealRemaining(student)} Clases
                                     </span>
 
-                                    <button
-                                        onClick={() => handleOpenRecharge(student)}
-                                        className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                                    >
-                                        <CreditCard className="w-4 h-4" />
-                                        Recargar
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => handleOpenAttendance(student)}
+                                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                            title="Marcar Asistencia"
+                                        >
+                                            <CheckCircle className="w-4 h-4" />
+                                            Asistencia
+                                        </button>
+                                        <button
+                                            onClick={() => handleOpenRecharge(student)}
+                                            className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                        >
+                                            <CreditCard className="w-4 h-4" />
+                                            Recargar
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         );
@@ -1444,6 +1568,102 @@ export default function Students() {
                                 className="w-full bg-sky-600 text-white font-bold py-3 rounded-xl hover:bg-sky-700 transition-colors disabled:opacity-50 mt-4"
                             >
                                 {isSaving ? 'Procesando...' : 'Confirmar Recarga'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ATTENDANCE MODAL */}
+            {isAttendanceModalOpen && studentForAttendance && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="p-6 border-b border-slate-100 bg-emerald-50/50">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-800">Marcar Asistencia</h3>
+                                    <p className="text-sm text-slate-500 mt-1">{studentForAttendance.fullName}</p>
+                                </div>
+                                <button
+                                    onClick={() => setIsAttendanceModalOpen(false)}
+                                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleAttendanceSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Fecha</label>
+                                <input
+                                    type="date"
+                                    required
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/50 outline-none"
+                                    value={attendanceData.fecha}
+                                    onChange={e => setAttendanceData({ ...attendanceData, fecha: e.target.value })}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Estado</label>
+                                <div className="flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAttendanceData({ ...attendanceData, asistencia: true })}
+                                        className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${attendanceData.asistencia
+                                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            }`}
+                                    >
+                                        ✅ Asistió
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAttendanceData({ ...attendanceData, asistencia: false })}
+                                        className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${!attendanceData.asistencia
+                                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            }`}
+                                    >
+                                        ❌ Faltó
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Attendance History */}
+                            {studentForAttendance.asistencia && studentForAttendance.asistencia.length > 0 && (
+                                <div className="border-t border-slate-100 pt-4">
+                                    <h4 className="text-sm font-bold text-slate-700 mb-3">Historial de Asistencia</h4>
+                                    <div className="max-h-48 overflow-y-auto space-y-2">
+                                        {studentForAttendance.asistencia.slice(0, 15).map((record, index) => (
+                                            <div
+                                                key={index}
+                                                className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg"
+                                            >
+                                                <span className="text-sm text-slate-600 font-mono">
+                                                    {new Date(record.fecha).toLocaleDateString('es-PE', {
+                                                        day: '2-digit',
+                                                        month: 'short',
+                                                        year: 'numeric'
+                                                    })}
+                                                </span>
+                                                <span className={`text-sm font-bold ${record.asistencia ? 'text-emerald-600' : 'text-red-600'
+                                                    }`}>
+                                                    {record.asistencia ? '✅ Asistió' : '❌ Faltó'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={isSaving}
+                                className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 mt-4"
+                            >
+                                {isSaving ? 'Guardando...' : 'Guardar Asistencia'}
                             </button>
                         </form>
                     </div>
