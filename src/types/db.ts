@@ -146,6 +146,11 @@ export interface PackageHistory {
     classesTotal: number;
 }
 
+export interface AttendanceRecord {
+    fecha: string; // YYYY-MM-DD format
+    asistencia: boolean; // true = attended, false = absent
+}
+
 export interface Student {
     id: string; // DNI or generated ID
     fullName: string;
@@ -167,6 +172,7 @@ export interface Student {
     birthDate?: string | null; // YYYY-MM-DD (optional)
     age?: number | null; // Manual age override
     studentCode?: string; // Auto-incremental code e.g. "00001"
+    asistencia?: AttendanceRecord[]; // Attendance history tracking
 }
 
 export interface AppUser {
