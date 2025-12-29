@@ -1,6 +1,6 @@
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import type { CardConfig, CardFieldConfig } from '../types/db';
+import type { CardConfig } from '../types/db';
 
 const CARD_CONFIG_ID = 'default';
 

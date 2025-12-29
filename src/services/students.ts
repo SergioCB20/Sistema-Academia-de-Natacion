@@ -504,7 +504,7 @@ export const studentService = {
         // Import services dynamically to avoid circular dependencies
         const { monthlyScheduleService } = await import('./monthlyScheduleService');
         const { seasonService } = await import('./seasonService');
-        const { formatMonthId, getMonthName } = await import('../utils/monthUtils');
+        const { getMonthName } = await import('../utils/monthUtils');
 
         // ... Reuse validation logic via helper or explicitly ...
         // For now, allow redundancy or refactor to use common logic.
@@ -525,7 +525,7 @@ export const studentService = {
         if (!activeSeason) throw new Error('No hay temporada activa.');
 
         const slotsInfo = await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate);
-        const { matchingSlots, errors: slotErrors } = slotsInfo;
+        const { matchingSlots } = slotsInfo;
 
         // Validation happened in _getMatchingSlots or similar? 
         // No, let's just copy the critical "enrollment" part here and delegate the finding to _getMatchingSlots.
