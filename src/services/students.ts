@@ -383,10 +383,16 @@ export const studentService = {
                 // 4. Perform updates
                 transaction.delete(studentRef);
 
-                // Update counter
+                // Update counters
                 if (metadataDoc.exists()) {
                     const currentCount = metadataDoc.data().students || 0;
-                    transaction.update(metadataRef, { students: Math.max(0, currentCount - 1) });
+                    const activeCount = metadataDoc.data().activeStudents || 0;
+                    const wasActive = studentData.active !== false;
+
+                    transaction.update(metadataRef, {
+                        students: Math.max(0, currentCount - 1),
+                        activeStudents: wasActive ? Math.max(0, activeCount - 1) : activeCount
+                    });
                 }
 
                 // Shift codes down
@@ -396,14 +402,26 @@ export const studentService = {
                         const currentVal = parseInt(data.studentCode, 10);
                         const newVal = currentVal - 1;
                         // Format with leading zeros
-                        const newCode = newVal.toString().padStart(5, '0');
+                        const newCode = newVal.toString().padStart(6, '0');
                         transaction.update(docSnap.ref, { studentCode: newCode });
                     }
                 });
             } else {
                 // No code, just delete
                 transaction.delete(studentRef);
-                // No need to update counter or shift others
+
+                // Still need to update active counter even if no studentCode shift
+                const metadataRef = doc(db, 'metadata', 'counters');
+                const metaDoc = await transaction.get(metadataRef);
+                if (metaDoc.exists()) {
+                    const activeCount = metaDoc.data().activeStudents || 0;
+                    const wasActive = studentData.active !== false;
+                    if (wasActive) {
+                        transaction.update(metadataRef, {
+                            activeStudents: Math.max(0, activeCount - 1)
+                        });
+                    }
+                }
             }
         });
     },
@@ -413,7 +431,22 @@ export const studentService = {
      */
     async toggleActive(studentId: string, active: boolean): Promise<void> {
         const ref = doc(db, STUDENTS_COLLECTION, studentId);
-        await updateDoc(ref, { active });
+        const metadataRef = doc(db, 'metadata', 'counters');
+
+        await runTransaction(db, async (transaction) => {
+            const studentDoc = await transaction.get(ref);
+            if (!studentDoc.exists()) throw new Error("Estudiante no encontrado");
+
+            const currentData = studentDoc.data();
+            const wasActive = currentData.active !== false;
+
+            if (wasActive === active) return; // No change
+
+            transaction.update(ref, { active });
+            transaction.update(metadataRef, {
+                activeStudents: increment(active ? 1 : -1)
+            });
+        });
     },
 
 
