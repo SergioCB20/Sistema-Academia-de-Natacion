@@ -66,11 +66,11 @@ export const studentService = {
             // --- END OF READS ---
 
             // 3. Prepare Code
-            let nextCode = "00001";
+            let nextCode = "000001";
             if (metadataDoc.exists()) {
                 const currentCount = metadataDoc.data().students || 0;
                 const nextCount = currentCount + 1;
-                nextCode = nextCount.toString().padStart(5, '0');
+                nextCode = nextCount.toString().padStart(6, '0');
                 transaction.update(metadataRef, {
                     students: nextCount,
                     activeStudents: increment(1)
@@ -161,7 +161,8 @@ export const studentService = {
                 studentData.id,
                 studentData.fixedSchedule,
                 studentData.packageEndDate,
-                studentData.packageStartDate // Pass packageStartDate for future enrollment
+                studentData.packageStartDate,
+                studentData.categoryId
             );
         }
     },
@@ -293,11 +294,39 @@ export const studentService = {
             throw new Error("Estudiante no encontrado");
         }
 
-        const currentData = studentDoc.data();
+        const currentData = studentDoc.data() as Student;
         const wasActive = currentData.active !== false; // Default to true if not set
         const willBeActive = updates.active !== false; // Check if being deactivated
 
         await updateDoc(studentRef, updates);
+
+        // Re-sync monthly slots if critical data changed
+        const dateChanged = updates.packageStartDate !== undefined || updates.packageEndDate !== undefined;
+        const scheduleChanged = updates.fixedSchedule !== undefined;
+
+        if (dateChanged || scheduleChanged) {
+            const finalSchedule = updates.fixedSchedule || currentData.fixedSchedule;
+            const finalStart = updates.packageStartDate !== undefined ? updates.packageStartDate : currentData.packageStartDate;
+            const finalEnd = updates.packageEndDate !== undefined ? updates.packageEndDate : currentData.packageEndDate;
+            const finalCategory = updates.categoryId || currentData.categoryId;
+
+            // Only sync if there is a schedule
+            if (finalSchedule && finalSchedule.length > 0) {
+                try {
+                    await this.syncFixedScheduleToMonthlySlots(
+                        id,
+                        finalSchedule,
+                        finalEnd,
+                        finalStart,
+                        finalCategory
+                    );
+                } catch (error) {
+                    console.error("Error syncing schedule during update:", error);
+                    // We don't throw here to avoid blocking the basic update, 
+                    // but the changes are already saved in the student doc.
+                }
+            }
+        }
 
         // If student is being deactivated, decrement counter
         if (wasActive && !willBeActive) {
@@ -499,7 +528,8 @@ export const studentService = {
         studentId: string,
         fixedSchedule: Array<{ dayId: string, timeId: string }>,
         packageEndDate?: string | null,
-        packageStartDate?: string | null
+        packageStartDate?: string | null,
+        categoryId?: string
     ): Promise<void> {
         // Import services dynamically to avoid circular dependencies
         const { monthlyScheduleService } = await import('./monthlyScheduleService');
@@ -524,7 +554,7 @@ export const studentService = {
         const activeSeason = await seasonService.getActiveSeason();
         if (!activeSeason) throw new Error('No hay temporada activa.');
 
-        const slotsInfo = await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate);
+        const slotsInfo = await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate, categoryId);
         const { matchingSlots } = slotsInfo;
 
         // Validation happened in _getMatchingSlots or similar? 
@@ -559,13 +589,14 @@ export const studentService = {
     async validateScheduleAvailability(
         fixedSchedule: Array<{ dayId: string, timeId: string }>,
         packageStartDate?: string | null,
-        packageEndDate?: string | null
+        packageEndDate?: string | null,
+        categoryId?: string
     ): Promise<void> {
         const { seasonService } = await import('./seasonService');
         const activeSeason = await seasonService.getActiveSeason();
         if (!activeSeason) throw new Error('No hay temporada activa.');
 
-        await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate);
+        await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate, categoryId);
     },
 
     /**
@@ -575,7 +606,8 @@ export const studentService = {
         activeSeason: any,
         fixedSchedule: Array<{ dayId: string, timeId: string }>,
         packageStartDate?: string | null,
-        packageEndDate?: string | null
+        packageEndDate?: string | null,
+        categoryId?: string
     ): Promise<{ matchingSlots: any[], errors?: string[] }> {
         const { formatMonthId, getMonthName } = await import('../utils/monthUtils');
         const { db } = await import('../lib/firebase');
@@ -618,7 +650,9 @@ export const studentService = {
             const slotMonth = slot.month;
             const isWithinPeriod = slotMonth >= currentMonth && slotMonth <= endMonth;
 
-            if (matchesTimeSlot && isWithinPeriod) {
+            const isOfCategory = !categoryId || slot.categoryId === categoryId;
+
+            if (matchesTimeSlot && isWithinPeriod && isOfCategory) {
                 matchingSlots.push({
                     id: docSnap.id,
                     month: slotMonth,

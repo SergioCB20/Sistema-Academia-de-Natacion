@@ -85,7 +85,8 @@ export default function Students() {
         categoryId: '',
         packageId: '',
         paymentMethodId: '',
-        packageStartDate: '' // Optional future start date
+        packageStartDate: '', // Optional future start date
+        packageEndDate: ''
     });
 
     const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
@@ -271,7 +272,8 @@ export default function Students() {
             categoryId: '',
             packageId: '',
             paymentMethodId: '',
-            packageStartDate: ''
+            packageStartDate: '',
+            packageEndDate: ''
         });
         setFixedSchedule([]);
         setPaymentData({
@@ -300,7 +302,8 @@ export default function Students() {
             categoryId: student.categoryId || '',
             packageId: student.currentPackageId || '',
             paymentMethodId: '',
-            packageStartDate: student.packageStartDate || ''
+            packageStartDate: student.packageStartDate || '',
+            packageEndDate: student.packageEndDate || ''
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
@@ -350,7 +353,8 @@ export default function Students() {
                     age: formData.age ? Number(formData.age) : null,
                     categoryId: formData.categoryId,
                     fixedSchedule: fixedSchedule,
-                    packageStartDate: formData.packageStartDate || null
+                    packageStartDate: formData.packageStartDate || null,
+                    packageEndDate: formData.packageEndDate || null
                 });
                 setIsModalOpen(false);
                 loadStudents();
@@ -542,7 +546,10 @@ export default function Students() {
                 str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
             const targetName = normalize(formData.fullName);
-            const isDuplicate = students.some(s => normalize(s.fullName) === targetName);
+            const isDuplicate = students.some(s =>
+                normalize(s.fullName) === targetName &&
+                (!editingStudent || s.id !== editingStudent.id)
+            );
 
             if (isDuplicate) {
                 if (!confirm(`El alumno "${formData.fullName}" ya parece estar registrado. ¿Desea continuar de todos modos?`)) {
@@ -701,8 +708,7 @@ export default function Students() {
 
                                 <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
                                     <Phone className="w-4 h-4" />
-                                    <span>{student.phone}</span>
-                                    <span>{student.phone}</span>
+                                    <span>{(!student.phone || student.phone.toUpperCase() === 'SIN OBSERVACIONES') ? 'Sin teléfono' : student.phone}</span>
                                 </div>
                                 {student.studentCode && (
                                     <div className="flex items-center gap-2 text-sm text-sky-600 font-mono mb-4 bg-sky-50 px-2 py-1 rounded w-fit">
@@ -1201,9 +1207,48 @@ export default function Students() {
                                     )}
 
                                     {editingStudent && (
-                                        <div className="bg-slate-50 p-8 rounded-2xl text-center border-2 border-dashed border-slate-200">
-                                            <p className="font-bold text-slate-600">Gestión de Finanzas</p>
-                                            <p className="text-sm text-slate-400 mt-2">Los pagos deben editarse desde el módulo de Finanzas para mantener el historial.</p>
+                                        <div className="space-y-4">
+                                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+                                                <div className="flex items-center gap-2 text-amber-800 font-bold mb-1">
+                                                    <Calendar className="w-5 h-5" />
+                                                    <span>Vigencia del Paquete</span>
+                                                </div>
+                                                <p className="text-amber-700 text-xs">
+                                                    Ajusta las fechas de inicio y fin si es necesario. Esto afectará la visibilidad del alumno en los horarios mensuales.
+                                                </p>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Fecha Inicio</label>
+                                                    <div className="relative">
+                                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="date"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-slate-700"
+                                                            value={formData.packageStartDate}
+                                                            onChange={e => setFormData({ ...formData, packageStartDate: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Fecha Fin</label>
+                                                    <div className="relative">
+                                                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="date"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-slate-700"
+                                                            value={formData.packageEndDate}
+                                                            onChange={e => setFormData({ ...formData, packageEndDate: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-slate-50 p-6 rounded-2xl text-center border-2 border-dashed border-slate-200 mt-6">
+                                                <p className="font-bold text-slate-600">Gestión de Finanzas</p>
+                                                <p className="text-sm text-slate-400 mt-1">Los pagos se editan desde el módulo de Finanzas.</p>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
