@@ -749,28 +749,23 @@ export const studentService = {
 
     async getActiveStudentsCount(): Promise<number> {
         const metadataRef = doc(db, 'metadata', 'counters');
-        const metadataDoc = await getDoc(metadataRef);
 
-        if (!metadataDoc.exists()) {
-            // Fallback: count manually (only first time)
-            const q = query(
-                collection(db, STUDENTS_COLLECTION),
-                where('active', '==', true)
-            );
-            const snapshot = await getDocs(q);
-            const count = snapshot.size;
+        // ALWAYS recount for now to ensure we fix the out-of-sync state
+        // In the future, once synchronized, we can rely on the counter again.
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('active', '==', true)
+        );
+        const snapshot = await getDocs(q);
+        const count = snapshot.size;
 
-            // Initialize counter
-            await setDoc(metadataRef, {
-                students: count,
-                activeStudents: count,
-                lastUpdated: Date.now()
-            }, { merge: true });
+        // Update the counter doc with the real count
+        await setDoc(metadataRef, {
+            activeStudents: count,
+            lastSynced: Date.now()
+        }, { merge: true });
 
-            return count;
-        }
-
-        return metadataDoc.data().activeStudents || 0;
+        return count;
     },
 
     /**
