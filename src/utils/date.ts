@@ -32,5 +32,17 @@ export const dateUtils = {
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
+    },
+
+    /**
+     * Formats a Date object to DD/MM/YYYY using UTC components.
+     * Use this when the Date represents a specific day (like a birthday or start date)
+     * and shouldn't be shifted by timezones.
+     */
+    formatDateUTC: (date: Date) => {
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const year = date.getUTCFullYear();
+        return `${day}/${month}/${year}`;
     }
 };

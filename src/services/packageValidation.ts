@@ -224,7 +224,11 @@ export const packageValidationService = {
         selectedDays: string[] // ['LUN', 'MIE', 'VIE']
     ): Date {
         if (creditsToAdd <= 0 || selectedDays.length === 0) {
-            return currentEndDate ? new Date(currentEndDate) : new Date();
+            if (currentEndDate) {
+                const [y, m, d] = currentEndDate.split('-').map(Number);
+                return new Date(y, m - 1, d);
+            }
+            return new Date();
         }
 
         const today = new Date();

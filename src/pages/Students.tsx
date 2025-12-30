@@ -142,7 +142,10 @@ export default function Students() {
     // Auto-calculate Package End Date
     useEffect(() => {
         if (paymentData.startDate && Number(paymentData.credits) > 0 && fixedSchedule.length > 0) {
-            const start = new Date(paymentData.startDate);
+            // Fix: Parse YYYY-MM-DD manually to create Local Date
+            const [y, m, d] = paymentData.startDate.split('-').map(Number);
+            const start = new Date(y, m - 1, d);
+
             const selectedDays = Array.from(new Set(fixedSchedule.map(s => s.dayId))); // ['LUN', 'MIE', 'VIE']
 
             const calculatedEnd = packageValidationService.calculatePreciseEndDate(

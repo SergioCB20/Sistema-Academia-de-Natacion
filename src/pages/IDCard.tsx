@@ -106,12 +106,14 @@ export default function IDCard() {
         // We know timeId is like "06-07", let's format it loosely
         const cleanTime = (t: string) => {
             const [start, end] = t.split('-');
-            const formatHour = (hour: string) => {
-                const h = parseInt(hour);
-                if (h === 0) return '12:00am';
-                if (h < 12) return `${h}:00am`;
-                if (h === 12) return '12:00pm';
-                return `${h - 12}:00pm`;
+            const formatHour = (timeStr: string) => {
+                if (!timeStr) return '';
+                const [hStr, mStr] = timeStr.includes(':') ? timeStr.split(':') : [timeStr, '00'];
+                const h = parseInt(hStr);
+                const suffix = h >= 12 ? 'pm' : 'am';
+                const h12 = h % 12 || 12; // Convert 0 to 12
+
+                return `${h12}:${mStr || '00'}${suffix}`;
             };
             return `${formatHour(start)} - ${formatHour(end)}`;
         };

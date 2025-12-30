@@ -6,6 +6,7 @@ import { studentService } from '../services/students';
 import { useSeason } from '../contexts/SeasonContext';
 import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth, parseMonthId } from '../utils/monthUtils';
 import { calculateRealRemaining } from '../utils/studentUtils';
+import { dateUtils } from '../utils/date';
 import type { MonthlySlot, MonthlyEnrollment, Student, Category } from '../types/db';
 
 export default function MonthlySchedule() {
@@ -515,11 +516,11 @@ export default function MonthlySchedule() {
                                                                 <div className="text-xs space-y-0.5 mt-0.5">
                                                                     {isFuture && (
                                                                         <p className="text-amber-600 font-bold flex items-center gap-1">
-                                                                            ⏳ Inicia: {startDate.toLocaleDateString('es-PE')}
+                                                                            ⏳ Inicia: {dateUtils.formatDateUTC(startDate)}
                                                                         </p>
                                                                     )}
                                                                     <p className={`${isFuture ? 'text-amber-600/70' : 'text-slate-400'}`}>
-                                                                        Finaliza: {endDate.toLocaleDateString('es-PE')}
+                                                                        Finaliza: {dateUtils.formatDateUTC(endDate)}
                                                                         {isExpired && (
                                                                             <span className="ml-2 text-red-600 font-bold">(Expirado)</span>
                                                                         )}
