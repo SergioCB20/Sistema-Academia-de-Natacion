@@ -42,9 +42,18 @@ function App() {
                   <Dashboard />
                 </ProtectedRoute>
               } />
-              <Route path="alumnos" element={<Students />} />
-              <Route path="horarios" element={<MonthlySchedule />} />
+              <Route path="alumnos" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN', 'ADMIN']}>
+                  <Students />
+                </ProtectedRoute>
+              } />
+              <Route path="horarios" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN', 'ADMIN', 'STAFF']}>
+                  <MonthlySchedule />
+                </ProtectedRoute>
+              } />
               <Route path="caja" element={
+
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <Finance />
                 </ProtectedRoute>

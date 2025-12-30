@@ -122,20 +122,16 @@ export default function IDCard() {
     const formatDate = (ts: number | string) => {
         if (!ts) return '-';
 
-        // If string in format YYYY-MMM-DD (e.g., "2026-Jan-29")
-        if (typeof ts === 'string' && ts.includes('-')) {
-            // Try to parse as Date first
-            const date = new Date(ts);
-            if (!isNaN(date.getTime())) {
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                return `${day}/${month}/${year}`;
-            }
+        // Detect YYYY-MM-DD format (standard in this app's storage)
+        if (typeof ts === 'string' && /^\d{4}-\d{2}-\d{2}/.test(ts)) {
+            const [y, m, d] = ts.split('-');
+            return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
         }
 
-        // If timestamp - format as DD/MM/YYYY
+        // Fallback for timestamps or other formats
         const date = new Date(ts);
+        if (isNaN(date.getTime())) return '-';
+
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();

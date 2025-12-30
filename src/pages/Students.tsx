@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     User,
@@ -681,8 +681,13 @@ export default function Students() {
                 }
             }
 
-            // Package selection is now manual as requested
-            setFormData(prev => ({ ...prev, packageId: '' }));
+            // Package selection is now manual
+            // Auto-select "custom" if no standard packages match the filtered patterns
+            if (filteredPackages.length === 0 && selectedDayTypes.length > 0) {
+                setFormData(prev => ({ ...prev, packageId: 'custom' }));
+            } else {
+                setFormData(prev => ({ ...prev, packageId: '' }));
+            }
             setSelectedPackage(null);
 
             // If we have a minimum start date (due to full capacity), pre-fill it
@@ -720,6 +725,36 @@ export default function Students() {
     const debtAmount = Number(paymentData.totalCost) - Number(paymentData.amountPaid);
 
     const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
+
+    // Helper: Calculate which dayTypes are currently selected in the fixedSchedule
+    const selectedDayTypes = useMemo(() => {
+        const types = new Set<DayType>();
+        fixedSchedule.forEach(fs => {
+            (Object.entries(dayTypeMapMapping) as [DayType, string[]][]).forEach(([type, days]) => {
+                if (days.includes(fs.dayId)) {
+                    types.add(type);
+                }
+            });
+        });
+        return Array.from(types);
+    }, [fixedSchedule]);
+
+    // Filter packages based on selected day pattern
+    const filteredPackages = useMemo(() => {
+        if (selectedDayTypes.length === 0) return availablePackages;
+
+        // If multiple day patterns are selected (e.g. L-M-V and M-J), show NO standard packages
+        if (selectedDayTypes.length > 1) return [];
+
+        const pattern = selectedDayTypes[0];
+        if (pattern === 'lun-mier-vier') {
+            // L-M-V: 12 or 24 classes
+            return availablePackages.filter(p => p.classesPerMonth === 12 || p.classesPerMonth === 24);
+        } else {
+            // M-J or S-D: 8 or 16 classes
+            return availablePackages.filter(p => p.classesPerMonth === 8 || p.classesPerMonth === 16);
+        }
+    }, [availablePackages, selectedDayTypes]);
 
     // Helper: Calculate elapsed classes for a student based on schedule and start date
     // calculateRealRemaining is now imported from ../utils/studentUtils
@@ -1205,7 +1240,7 @@ export default function Students() {
                                                     }}
                                                 >
                                                     <option value="">Seleccione un paquete...</option>
-                                                    {availablePackages.map(pkg => (
+                                                    {filteredPackages.map(pkg => (
                                                         <option key={pkg.id} value={pkg.id}>
                                                             {pkg.name} - S/ {pkg.price} ({pkg.classesPerMonth} clases)
                                                         </option>
@@ -1270,10 +1305,9 @@ export default function Students() {
                                                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                                         <input
                                                             type="date"
-                                                            readOnly
-                                                            disabled
-                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed font-bold"
+                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-slate-700"
                                                             value={paymentData.endDate}
+                                                            onChange={e => setPaymentData({ ...paymentData, endDate: e.target.value })}
                                                         />
                                                     </div>
                                                 </div>

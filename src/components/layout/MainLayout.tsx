@@ -21,13 +21,14 @@ export default function MainLayout() {
     // Role hierarchy: SUPERADMIN > ADMIN > STAFF
     // SUPERADMIN: Full access (all pages)
     // ADMIN: Horarios, Alumnos, Carnet
-    // STAFF: Horarios, Alumnos only
+    // STAFF: Horarios only
 
     const navItems = [
         { to: '/', icon: LayoutDashboard, label: 'Panel', roles: ['SUPERADMIN'] },
-        { to: '/alumnos', icon: Users, label: 'Alumnos', roles: ['SUPERADMIN', 'ADMIN', 'STAFF'] },
+        { to: '/alumnos', icon: Users, label: 'Alumnos', roles: ['SUPERADMIN', 'ADMIN'] },
         { to: '/horarios', icon: Calendar, label: 'Horarios', roles: ['SUPERADMIN', 'ADMIN', 'STAFF'] },
         { to: '/caja', icon: DollarSign, label: 'Caja', roles: ['SUPERADMIN'] },
+
         { to: '/carnet', icon: CreditCard, label: 'Carnet', roles: ['SUPERADMIN', 'ADMIN'] },
     ];
 
