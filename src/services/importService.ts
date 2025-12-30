@@ -187,30 +187,111 @@ function parseExcelDate(value: string | Date | number | undefined): string | nul
 }
 
 /**
+ * Calcula la fecha de fin basada en fecha de inicio, cantidad de clases y días permitidos
+ */
+function calculateEndDate(startDate: Date, classCount: number, dayIds: string[]): Date {
+    // Mapeo de IDs a número de día JS (0=Domingo, 1=Lunes...)
+    const dayMap: Record<string, number> = {
+        'DOM': 0, 'LUN': 1, 'MAR': 2, 'MIE': 3, 'JUE': 4, 'VIE': 5, 'SAB': 6
+    };
+
+    const allowedDays = dayIds.map(id => dayMap[id]);
+    let currentDate = new Date(startDate);
+    let classesFound = 0;
+
+    // Si la fecha de inicio es válida para clase, cuenta como la primera
+    if (allowedDays.includes(currentDate.getDay())) {
+        classesFound++;
+    }
+
+    // Iterar hasta completar las clases
+    while (classesFound < classCount) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        if (allowedDays.includes(currentDate.getDay())) {
+            classesFound++;
+        }
+    }
+
+    return currentDate;
+}
+
+/**
  * Aplica correcciones automáticas a los datos crudos del Excel
  */
 export function applyAutoFixes(rows: ImportRow[]): { fixedRows: ImportRow[], summary: string[] } {
     const summary: string[] = [];
     let dateFixes = 0;
     let categoryFixes = 0;
+    let oldDateFixes = 0;
 
     const fixedRows = rows.map(row => {
         const newRow = { ...row };
 
         // 1. Corregir fechas invertidas (Ffin < Fini)
         // Usamos parseExcelDate para normalizar a YYYY-MM-DD para comparar
-        const dIniStr = parseExcelDate(newRow.Fini_Al);
-        const dFinStr = parseExcelDate(newRow.Ffin_Al);
+        let dIniStr = parseExcelDate(newRow.Fini_Al);
+        let dFinStr = parseExcelDate(newRow.Ffin_Al);
 
         if (dIniStr && dFinStr && dFinStr < dIniStr) {
             // Intercambiar valores originales para preservar el tipo (Date o String o Número)
             const temp = newRow.Fini_Al;
             newRow.Fini_Al = newRow.Ffin_Al;
             newRow.Ffin_Al = temp;
+
+            // Actualizar para siguientes validaciones
+            const tempStr = dIniStr;
+            dIniStr = dFinStr;
+            dFinStr = tempStr;
+
             dateFixes++;
         }
 
-        // 2. Corregir categorías por edad basándose en la configuración REAL del sistema (Screenshot)
+        // 2. Corregir fechas antiguas (< 05/01/2026) y recalcular fin
+        // Fecha corte: 5 de Enero 2026
+        const CUTOFF_DATE = '2026-01-05';
+
+        if (dIniStr && dIniStr < CUTOFF_DATE) {
+            const horario = HORARIO_MAP[newRow.Cod_Hor];
+
+            if (horario) {
+                let newStartDateStr = '';
+
+                // Determinar nueva fecha inicio según horario
+                // Códigos Access: 1=L-M-V, 2=M-J, 3=S-D, 4=Diario
+                const codHor = Number(newRow.Cod_Hor);
+
+                if (codHor === 1 || codHor === 4) {
+                    newStartDateStr = '2026-01-05'; // Lun 5 Ene
+                } else if (codHor === 2) {
+                    newStartDateStr = '2026-01-06'; // Mar 6 Ene
+                } else if (codHor === 3) {
+                    newStartDateStr = '2026-01-10'; // Sab 10 Ene
+                }
+
+                if (newStartDateStr) {
+                    // Actualizar Fecha Inicio
+                    newRow.Fini_Al = newStartDateStr;
+
+                    // Recalcular Fecha Fin
+                    const classCount = newRow.Clas_Al || 0;
+                    if (classCount > 0) {
+                        // Crear objeto Date para el cálculo (asegurando mediodía para evitar problemas de zona horaria)
+                        const startObj = new Date(newStartDateStr + 'T12:00:00');
+                        const endObj = calculateEndDate(startObj, classCount, horario.dayIds);
+
+                        // Formatear nueva fecha fin YYYY-MM-DD
+                        const year = endObj.getFullYear();
+                        const month = String(endObj.getMonth() + 1).padStart(2, '0');
+                        const day = String(endObj.getDate()).padStart(2, '0');
+                        newRow.Ffin_Al = `${year}-${month}-${day}`;
+                    }
+
+                    oldDateFixes++;
+                }
+            }
+        }
+
+        // 3. Corregir categorías por edad basándose en la configuración REAL del sistema (Screenshot)
         const age = newRow.Edad_Al || 0;
         const currentCatCode = newRow.Cod_Cat?.toString().padStart(2, '0');
         const currentCatInfo = CATEGORIA_MAP[currentCatCode];
@@ -243,6 +324,7 @@ export function applyAutoFixes(rows: ImportRow[]): { fixedRows: ImportRow[], sum
     });
 
     if (dateFixes > 0) summary.push(`Se corrigieron ${dateFixes} alumnos con fechas invertidas.`);
+    if (oldDateFixes > 0) summary.push(`Se ajustaron fechas para ${oldDateFixes} alumnos anteriores al 5/1/26.`);
     if (categoryFixes > 0) summary.push(`Se ajustaron ${categoryFixes} alumnos a su categoría correcta según edad.`);
 
     return { fixedRows, summary };
