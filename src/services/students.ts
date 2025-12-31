@@ -802,23 +802,38 @@ export const studentService = {
 
             const studentData = studentDoc.data() as Student;
             const currentAttendance = studentData.asistencia || [];
+            let credits = studentData.remainingCredits || 0;
 
             // Check if attendance for this date already exists
             const existingIndex = currentAttendance.findIndex(a => a.fecha === fecha);
 
             if (existingIndex >= 0) {
+                const previousStatus = currentAttendance[existingIndex].asistencia;
                 // Update existing record
                 currentAttendance[existingIndex] = { fecha, asistencia };
+
+                // Adjust credits if status changed
+                if (previousStatus !== asistencia) {
+                    if (asistencia) {
+                        credits--; // Changed from False to True
+                    } else {
+                        credits++; // Changed from True to False
+                    }
+                }
             } else {
                 // Add new record
                 currentAttendance.push({ fecha, asistencia });
+                if (asistencia) {
+                    credits--; // New record True
+                }
             }
 
             // Sort by date (newest first)
             currentAttendance.sort((a, b) => b.fecha.localeCompare(a.fecha));
 
             transaction.update(studentRef, {
-                asistencia: currentAttendance
+                asistencia: currentAttendance,
+                remainingCredits: credits
             });
         });
     }

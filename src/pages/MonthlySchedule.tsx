@@ -90,32 +90,7 @@ export default function MonthlySchedule() {
 
     const openModal = (slot: MonthlySlot) => {
         setSelectedSlot(slot);
-        setSearchTerm('');
-        setViewMode('list');
         setIsModalOpen(true);
-    };
-
-    const handleEnroll = async (student: Student) => {
-        if (!selectedSlot) return;
-
-        if (!confirm(`¿Inscribir a ${student.fullName} en este horario mensual?`)) return;
-
-        setBookingLoading(true);
-        try {
-            await monthlyScheduleService.enrollStudent(selectedSlot.id, student.id);
-            await loadData();
-
-            // Update selected slot
-            const updatedSlot = await monthlyScheduleService.getById(selectedSlot.id);
-            if (updatedSlot) {
-                setSelectedSlot(updatedSlot);
-            }
-        } catch (error: any) {
-            console.error(error);
-            alert(error.message || 'Error al inscribir');
-        } finally {
-            setBookingLoading(false);
-        }
     };
 
     const handleUnenroll = async (studentId: string, studentName: string) => {
@@ -145,6 +120,25 @@ export default function MonthlySchedule() {
         s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.dni.includes(searchTerm)
     );
+
+    const handleEnroll = async (student: Student) => {
+        if (!selectedSlot) return;
+        if (!confirm(`¿Inscribir a ${student.fullName}?`)) return;
+        setBookingLoading(true);
+        try {
+            await monthlyScheduleService.enrollStudent(selectedSlot.id, student.id);
+            await loadData();
+            const updated = await monthlyScheduleService.getById(selectedSlot.id);
+            if (updated) setSelectedSlot(updated);
+            alert('Inscrito correctamente');
+        } catch (e: any) {
+            alert(e.message);
+        } finally {
+            setBookingLoading(false);
+        }
+    };
+
+
 
     // Calculate "Occupied Seats" based on peak concurrency
     const calculateOccupiedSeats = (enrollments: MonthlyEnrollment[], slot: MonthlySlot) => {
@@ -586,19 +580,8 @@ export default function MonthlySchedule() {
                                                         className="w-full px-3 py-2 rounded-lg border border-slate-200 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
                                                         defaultValue={new Date().toISOString().split('T')[0]}
                                                         id="attendance-date"
-                                                        // Force reload when date changes? No, just let logic read it.
                                                         onChange={(e) => {
-                                                            // Trigger re-render to update 'hasAttendedToday'
-                                                            // We can just use a state for the date if we want reactivity
-                                                            // For now simple approach
-                                                            const val = e.target.value;
-                                                            // Force update?
-                                                            setSearchTerm(val); // Hack to force render, or add explicit state
-                                                            // Better: add explicit state in next iteration if needed, 
-                                                            // but actually just switching viewMode re-renders. 
-                                                            // Let's add a wrapper state for date later if needed.
-                                                            // Actually, using searchTerm (which is unused in attendance mode) 
-                                                            // is a convenient hack to force re-render without new state.
+                                                            setSearchTerm(e.target.value); // Force render
                                                         }}
                                                     />
                                                 </div>
@@ -608,9 +591,12 @@ export default function MonthlySchedule() {
                                                         const student = students.find(s => s.id === enrollment.studentId);
                                                         if (!student) return null;
 
-                                                        const totalCredits = student.remainingCredits || 0;
+                                                        const activeBalance = student.remainingCredits || 0;
                                                         const attendedCount = student.asistencia?.filter(a => a.asistencia).length || 0;
-                                                        const isFinished = attendedCount >= totalCredits && totalCredits > 0;
+                                                        const estimatedTotal = activeBalance + attendedCount;
+
+                                                        const isPackageExpired = student.packageEndDate && new Date(student.packageEndDate) < new Date();
+                                                        const isFinished = activeBalance <= 0 || isPackageExpired;
 
                                                         // Get Date
                                                         const dateInput = document.getElementById('attendance-date') as HTMLInputElement;
@@ -631,7 +617,7 @@ export default function MonthlySchedule() {
                                                                     </div>
                                                                     <div className="flex items-center gap-2 mt-1">
                                                                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isFinished ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'}`}>
-                                                                            {attendedCount} / {totalCredits} clases
+                                                                            {attendedCount} / {estimatedTotal} clases
                                                                         </span>
                                                                         {isFinished && (
                                                                             <span className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5">
@@ -657,17 +643,26 @@ export default function MonthlySchedule() {
                                                                                 if (s.id === student.id) {
                                                                                     const currentAttendance = s.asistencia ? [...s.asistencia] : [];
                                                                                     const existingIndex = currentAttendance.findIndex(a => a.fecha === date);
+                                                                                    let newCredits = s.remainingCredits || 0;
 
+                                                                                    let wasAttended = false;
                                                                                     if (existingIndex >= 0) {
+                                                                                        wasAttended = currentAttendance[existingIndex].asistencia;
                                                                                         currentAttendance[existingIndex] = { fecha: date, asistencia: newStatus };
+
+                                                                                        // Adjust credits if changed
+                                                                                        if (wasAttended !== newStatus) {
+                                                                                            if (newStatus) newCredits--; else newCredits++;
+                                                                                        }
                                                                                     } else {
                                                                                         currentAttendance.push({ fecha: date, asistencia: newStatus });
+                                                                                        if (newStatus) newCredits--;
                                                                                     }
 
                                                                                     // Sort by date desc
                                                                                     currentAttendance.sort((a, b) => b.fecha.localeCompare(a.fecha));
 
-                                                                                    return { ...s, asistencia: currentAttendance };
+                                                                                    return { ...s, asistencia: currentAttendance, remainingCredits: newCredits };
                                                                                 }
                                                                                 return s;
                                                                             }));
@@ -698,7 +693,7 @@ export default function MonthlySchedule() {
                                                 filteredStudents.map(student => {
                                                     const isEnrolled = selectedSlot.enrolledStudents?.some(e => e.studentId === student.id);
                                                     const hasCredits = student.remainingCredits > 0;
-                                                    const canEnroll = !isEnrolled && hasCredits && !student.hasDebt;
+                                                    // Note: Debt check was visual.
 
                                                     return (
                                                         <div
@@ -706,37 +701,34 @@ export default function MonthlySchedule() {
                                                             className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors"
                                                         >
                                                             <div>
-                                                                <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                                <div className="flex items-center gap-2">
+                                                                    <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                                    {student.hasDebt && (
+                                                                        <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 font-bold">
+                                                                            DEUDA
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                                 <p className="text-xs text-slate-400">{student.dni}</p>
                                                             </div>
 
-                                                            <div className="flex items-center gap-3">
-                                                                {student.hasDebt ? (
-                                                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">
-                                                                        DEUDA
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                                                        }`}>
-                                                                        {student.remainingCredits} créd.
-                                                                    </span>
-                                                                )}
-
-                                                                {isEnrolled ? (
-                                                                    <span className="text-xs text-emerald-600 font-bold px-2">✓ Inscrito</span>
-                                                                ) : (
-                                                                    <button
-                                                                        disabled={!canEnroll || bookingLoading}
-                                                                        onClick={() => handleEnroll(student)}
-                                                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${canEnroll
-                                                                            ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
-                                                                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                                            }`}
-                                                                    >
-                                                                        Inscribir
-                                                                    </button>
-                                                                )}
-                                                            </div>
+                                                            {isEnrolled ? (
+                                                                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
+                                                                    Inscrito
+                                                                </span>
+                                                            ) : !hasCredits ? (
+                                                                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg">
+                                                                    Sin créditos
+                                                                </span>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => handleEnroll(student)}
+                                                                    disabled={bookingLoading}
+                                                                    className="px-3 py-1.5 bg-sky-50 text-sky-600 hover:bg-sky-100 rounded-lg text-xs font-bold transition-colors"
+                                                                >
+                                                                    Inscribir
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     );
                                                 })
