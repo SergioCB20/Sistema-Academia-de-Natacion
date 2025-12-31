@@ -483,14 +483,24 @@ export default function MonthlySchedule() {
                                                 </div>
                                             ) : (
                                                 validEnrollments.map((enrollment: MonthlyEnrollment) => {
-                                                    const endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
-                                                    const startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
+                                                    const student = students.find(s => s.id === enrollment.studentId);
+
+                                                    // Use Student profile dates if available, otherwise fall back to enrollment snapshot
+                                                    // This ensures that if the student date is edited, the schedule reflects it immediately
+                                                    let endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
+                                                    let startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
+
+                                                    if (student?.packageStartDate) {
+                                                        // Use noon to avoid timezone shift issues with YYYY-MM-DD strings
+                                                        startDate = new Date(`${student.packageStartDate}T12:00:00`);
+                                                    }
+                                                    if (student?.packageEndDate) {
+                                                        endDate = new Date(`${student.packageEndDate}T23:59:59`);
+                                                    }
 
                                                     const now = new Date();
                                                     const isFuture = startDate.getTime() > now.getTime();
                                                     const isExpired = endDate < now;
-
-                                                    const student = students.find(s => s.id === enrollment.studentId);
 
                                                     return (
                                                         <div
