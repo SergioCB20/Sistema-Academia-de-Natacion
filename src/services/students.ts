@@ -10,7 +10,8 @@ import {
     orderBy,
     limit,
     runTransaction,
-    increment // <-- AGREGAR ESTO
+    increment, // <-- AGREGAR ESTO
+    deleteDoc // <-- Added for deletion
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -350,7 +351,7 @@ export const studentService = {
      * Hard deletes a student.
      * WARNING: This can orphan related records (payments, debts) if not handled.
      */
-    async delete(studentId: string): Promise<void> {
+    async delete(studentId: string, deleteFinancialData: boolean = false): Promise<void> {
         const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
 
         await runTransaction(db, async (transaction) => {
@@ -367,17 +368,12 @@ export const studentService = {
 
             if (deletedCode) {
                 // 3. Find subsequent students
-                // Note: getDocs is not strictly transactional in client SDK regarding locks,
-                // but locking metadataRef prevents "insertions" at the end.
-                // Concurrent deletions might be an edge case but rare in this context.
                 const q = query(
                     collection(db, STUDENTS_COLLECTION),
                     where('studentCode', '>', deletedCode),
                     orderBy('studentCode')
                 );
 
-                // Execute query
-                // We have to await it. In a transaction, using non-transactional read is allowed.
                 const snapshot = await getDocs(q);
 
                 // 4. Perform updates
@@ -401,7 +397,6 @@ export const studentService = {
                     if (data.studentCode) {
                         const currentVal = parseInt(data.studentCode, 10);
                         const newVal = currentVal - 1;
-                        // Format with leading zeros
                         const newCode = newVal.toString().padStart(6, '0');
                         transaction.update(docSnap.ref, { studentCode: newCode });
                     }
@@ -410,7 +405,6 @@ export const studentService = {
                 // No code, just delete
                 transaction.delete(studentRef);
 
-                // Still need to update active counter even if no studentCode shift
                 const metadataRef = doc(db, 'metadata', 'counters');
                 const metaDoc = await transaction.get(metadataRef);
                 if (metaDoc.exists()) {
@@ -424,6 +418,67 @@ export const studentService = {
                 }
             }
         });
+
+        // 5. Delete Financial Data (Outside Transaction to avoid complexity/limits)
+        if (deleteFinancialData) {
+            try {
+                // Delete Payments
+                const paymentsQ = query(collection(db, PAYMENTS_COLLECTION), where('studentId', '==', studentId));
+                const paymentsSnap = await getDocs(paymentsQ);
+                const deletePaymentsPromises = paymentsSnap.docs.map(doc => deleteDoc(doc.ref));
+                await Promise.all(deletePaymentsPromises);
+
+                // Delete Debts
+                const debtsQ = query(collection(db, 'debts'), where('studentId', '==', studentId));
+                const debtsSnap = await getDocs(debtsQ);
+                const deleteDebtsPromises = debtsSnap.docs.map(doc => deleteDoc(doc.ref));
+                await Promise.all(deleteDebtsPromises);
+
+                console.log(`Eliminados ${paymentsSnap.size} pagos y ${debtsSnap.size} deudas del alumno ${studentId}`);
+            } catch (error) {
+                console.error("Error cleaning up financial data:", error);
+                // Don't throw, student is already deleted
+            }
+        }
+    },
+
+    /**
+     * CLEANUP TOOL: Remove payments and debts that have no valid student
+     */
+    async cleanupOrphanedData(): Promise<{ paymentsRemoved: number, debtsRemoved: number }> {
+        // 1. Get all Student IDs
+        const studentsSnap = await getDocs(collection(db, STUDENTS_COLLECTION));
+        const studentIds = new Set(studentsSnap.docs.map(d => d.id));
+
+        // 2. Check Payments
+        const paymentsSnap = await getDocs(collection(db, PAYMENTS_COLLECTION));
+        let paymentsRemoved = 0;
+        const paymentDeletions = [];
+
+        for (const docSnap of paymentsSnap.docs) {
+            const data = docSnap.data();
+            if (data.studentId && !studentIds.has(data.studentId)) {
+                paymentDeletions.push(deleteDoc(docSnap.ref));
+                paymentsRemoved++;
+            }
+        }
+        await Promise.all(paymentDeletions);
+
+        // 3. Check Debts
+        const debtsSnap = await getDocs(collection(db, 'debts'));
+        let debtsRemoved = 0;
+        const debtDeletions = [];
+
+        for (const docSnap of debtsSnap.docs) {
+            const data = docSnap.data();
+            if (data.studentId && !studentIds.has(data.studentId)) {
+                debtDeletions.push(deleteDoc(docSnap.ref));
+                debtsRemoved++;
+            }
+        }
+        await Promise.all(debtDeletions);
+
+        return { paymentsRemoved, debtsRemoved };
     },
 
     /**

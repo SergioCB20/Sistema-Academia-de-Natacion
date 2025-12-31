@@ -319,9 +319,13 @@ export default function Students() {
 
     const handleDelete = async (studentId: string) => {
         if (!confirm("¿Estás seguro de eliminar este alumno COMPLETAMENTE?")) return;
+
+        const deleteFinancials = confirm("¿Desea borrar también sus datos financieros (pagos y deudas)?\n\n[Aceptar] = Borrar Todo\n[Cancelar] = Mantener Historial Financiero");
+
         try {
-            await studentService.delete(studentId);
+            await studentService.delete(studentId, deleteFinancials);
             loadStudents();
+            alert("Alumno eliminado correctamente.");
         } catch (error) {
             console.error("Error deleting student:", error);
             alert("Error al eliminar");

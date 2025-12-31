@@ -89,7 +89,7 @@ export default function Finance() {
                 <>
                     {/* SUMMARY CARDS */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center group relative">
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
                                     <DollarSign className="w-6 h-6" />
@@ -99,6 +99,26 @@ export default function Finance() {
                                     <p className="text-2xl font-bold text-slate-800">S/ {getTotal().toFixed(2)}</p>
                                 </div>
                             </div>
+
+                            {/* Hidden Cleanup Button (Visible on Hover) */}
+                            <button
+                                onClick={async () => {
+                                    if (confirm("HERRAMIENTA DE LIMPIEZA\n\n¿Desea buscar y eliminar pagos que no tienen alumno asignado? (Esto corregirá cifras infladas por alumnos borrados anteriormente)")) {
+                                        try {
+                                            const { studentService } = await import('../services/students');
+                                            const res = await studentService.cleanupOrphanedData();
+                                            alert(`Limpieza completada.\n\nPagos eliminados: ${res.paymentsRemoved}\nDeudas eliminadas: ${res.debtsRemoved}`);
+                                            loadFinanceData(); // Reload chart
+                                        } catch (e: any) {
+                                            alert("Error: " + e.message);
+                                        }
+                                    }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 absolute top-2 right-2 text-[10px] text-slate-300 hover:text-red-500 transition-all cursor-pointer"
+                                title="Limpiar datos huérfanos"
+                            >
+                                FIX
+                            </button>
                         </div>
                     </div>
                 </>
