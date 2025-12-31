@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Search, Trash2, X } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Trash2, X } from 'lucide-react';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
@@ -33,8 +33,6 @@ export default function MonthlySchedule() {
     // Modal state
     const [selectedSlot, setSelectedSlot] = useState<MonthlySlot | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
-    const [searchTerm, setSearchTerm] = useState('');
     const [bookingLoading, setBookingLoading] = useState(false);
 
     // Update month when season changes
@@ -90,32 +88,7 @@ export default function MonthlySchedule() {
 
     const openModal = (slot: MonthlySlot) => {
         setSelectedSlot(slot);
-        setSearchTerm('');
-        setViewMode('list');
         setIsModalOpen(true);
-    };
-
-    const handleEnroll = async (student: Student) => {
-        if (!selectedSlot) return;
-
-        if (!confirm(`¿Inscribir a ${student.fullName} en este horario mensual?`)) return;
-
-        setBookingLoading(true);
-        try {
-            await monthlyScheduleService.enrollStudent(selectedSlot.id, student.id);
-            await loadData();
-
-            // Update selected slot
-            const updatedSlot = await monthlyScheduleService.getById(selectedSlot.id);
-            if (updatedSlot) {
-                setSelectedSlot(updatedSlot);
-            }
-        } catch (error: any) {
-            console.error(error);
-            alert(error.message || 'Error al inscribir');
-        } finally {
-            setBookingLoading(false);
-        }
     };
 
     const handleUnenroll = async (studentId: string, studentName: string) => {
@@ -141,10 +114,7 @@ export default function MonthlySchedule() {
         }
     };
 
-    const filteredStudents = students.filter(s =>
-        s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.dni.includes(searchTerm)
-    );
+
 
     // Calculate "Occupied Seats" based on peak concurrency
     const calculateOccupiedSeats = (enrollments: MonthlyEnrollment[], slot: MonthlySlot) => {
@@ -424,180 +394,81 @@ export default function MonthlySchedule() {
 
                             return (
                                 <>
-                                    {/* Tabs */}
-                                    <div className="flex border-b border-slate-100">
-                                        <button
-                                            onClick={() => setViewMode('list')}
-                                            className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'list'
-                                                ? 'text-sky-600 border-b-2 border-sky-600'
-                                                : 'text-slate-400 hover:text-slate-600'
-                                                }`}
-                                        >
-                                            Inscritos ({validCount})
-                                        </button>
-                                        <button
-                                            onClick={() => setViewMode('add')}
-                                            className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'add'
-                                                ? 'text-sky-600 border-b-2 border-sky-600'
-                                                : 'text-slate-400 hover:text-slate-600'
-                                                }`}
-                                        >
-                                            Agregar
-                                        </button>
-                                    </div>
-
-                                    {/* Search Box (Only in Add mode) */}
-                                    {viewMode === 'add' && (
-                                        <div className="p-4 border-b border-slate-100">
-                                            <div className="relative">
-                                                <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
-                                                <input
-                                                    type="text"
-                                                    placeholder="Buscar alumno..."
-                                                    autoFocus
-                                                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                                                    value={searchTerm}
-                                                    onChange={e => setSearchTerm(e.target.value)}
-                                                />
-                                            </div>
-                                        </div>
-                                    )}
-
                                     {/* Content Area */}
                                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                                        {viewMode === 'list' ? (
-                                            // LIST VIEW
-                                            (validCount === 0) ? (
-                                                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                                                    <Users className="w-12 h-12 mb-3 opacity-20" />
-                                                    <p>No hay alumnos inscritos</p>
-                                                    <button
-                                                        onClick={() => setViewMode('add')}
-                                                        className="mt-4 text-sky-600 font-bold hover:underline"
-                                                    >
-                                                        Inscribir al primero
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                validEnrollments.map((enrollment: MonthlyEnrollment) => {
-                                                    const endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
-                                                    const startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
-
-                                                    const now = new Date();
-                                                    const isFuture = startDate.getTime() > now.getTime();
-                                                    const isExpired = endDate < now;
-
-                                                    const student = students.find(s => s.id === enrollment.studentId);
-
-                                                    return (
-                                                        <div
-                                                            key={enrollment.studentId}
-                                                            className={`flex items-center justify-between p-3 rounded-xl group transition-colors border border-transparent 
-                                                ${isFuture ? 'bg-amber-50 border-amber-100' : 'hover:bg-slate-50 hover:border-slate-100'}
-                                                ${!student ? 'bg-red-50 border-red-100' : ''}
-                                                `}
-                                                        >
-                                                            <div className="flex-1">
-                                                                <div className='flex justify-between items-center mr-2'>
-                                                                    <p className={`font-bold ${isFuture ? 'text-amber-800' : !student ? 'text-red-700' : 'text-slate-700'}`}>
-                                                                        {enrollment.studentName}
-                                                                        {isFuture && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">FUTURO</span>}
-                                                                    </p>
-                                                                    {student && (() => {
-                                                                        const available = calculateRealRemaining(student);
-                                                                        const total = student.remainingCredits;
-                                                                        return (
-                                                                            <span className="text-xs font-mono font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded">
-                                                                                {available}/{total}
-                                                                            </span>
-                                                                        );
-                                                                    })()}
-                                                                </div>
-                                                                <div className="text-xs space-y-0.5 mt-0.5">
-                                                                    {isFuture && (
-                                                                        <p className="text-amber-600 font-bold flex items-center gap-1">
-                                                                            ⏳ Inicia: {dateUtils.formatDateUTC(startDate)}
-                                                                        </p>
-                                                                    )}
-                                                                    <p className={`${isFuture ? 'text-amber-600/70' : 'text-slate-400'}`}>
-                                                                        Finaliza: {dateUtils.formatDateUTC(endDate)}
-                                                                        {isExpired && (
-                                                                            <span className="ml-2 text-red-600 font-bold">(Expirado)</span>
-                                                                        )}
-                                                                    </p>
-                                                                    {!student && (
-                                                                        <p className="text-red-500 font-bold flex items-center gap-1">
-                                                                            ⚠️ Alumno no encontrado o eliminado
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-
-                                                            <button
-                                                                onClick={() => handleUnenroll(enrollment.studentId, enrollment.studentName)}
-                                                                disabled={bookingLoading}
-                                                                className={`p-2 rounded-lg transition-colors ${isFuture
-                                                                    ? 'text-amber-400 hover:text-red-600 hover:bg-amber-100'
-                                                                    : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
-                                                                title="Desinscribir"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                })
-                                            )
+                                        {(validCount === 0) ? (
+                                            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                                                <Users className="w-12 h-12 mb-3 opacity-20" />
+                                                <p>No hay alumnos inscritos</p>
+                                            </div>
                                         ) : (
-                                            // ADD VIEW
-                                            filteredStudents.length === 0 ? (
-                                                <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
-                                            ) : (
-                                                filteredStudents.map(student => {
-                                                    const isEnrolled = selectedSlot.enrolledStudents?.some(e => e.studentId === student.id);
-                                                    const hasCredits = student.remainingCredits > 0;
-                                                    const canEnroll = !isEnrolled && hasCredits && !student.hasDebt;
+                                            validEnrollments.map((enrollment: MonthlyEnrollment) => {
+                                                const endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
+                                                const startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
 
-                                                    return (
-                                                        <div
-                                                            key={student.id}
-                                                            className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors"
-                                                        >
-                                                            <div>
-                                                                <p className="font-bold text-slate-700">{student.fullName}</p>
-                                                                <p className="text-xs text-slate-400">{student.dni}</p>
+                                                const now = new Date();
+                                                const isFuture = startDate.getTime() > now.getTime();
+                                                const isExpired = endDate < now;
+
+                                                const student = students.find(s => s.id === enrollment.studentId);
+
+                                                return (
+                                                    <div
+                                                        key={enrollment.studentId}
+                                                        className={`flex items-center justify-between p-3 rounded-xl group transition-colors border border-transparent 
+                                            ${isFuture ? 'bg-amber-50 border-amber-100' : 'hover:bg-slate-50 hover:border-slate-100'}
+                                            ${!student ? 'bg-red-50 border-red-100' : ''}
+                                            `}
+                                                    >
+                                                        <div className="flex-1">
+                                                            <div className='flex justify-between items-center mr-2'>
+                                                                <p className={`font-bold ${isFuture ? 'text-amber-800' : !student ? 'text-red-700' : 'text-slate-700'}`}>
+                                                                    {enrollment.studentName}
+                                                                    {isFuture && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">FUTURO</span>}
+                                                                </p>
+                                                                {student && (() => {
+                                                                    const available = calculateRealRemaining(student);
+                                                                    const total = student.remainingCredits;
+                                                                    return (
+                                                                        <span className="text-xs font-mono font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded">
+                                                                            {available}/{total}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                             </div>
-
-                                                            <div className="flex items-center gap-3">
-                                                                {student.hasDebt ? (
-                                                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">
-                                                                        DEUDA
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${hasCredits ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                                                        }`}>
-                                                                        {student.remainingCredits} créd.
-                                                                    </span>
+                                                            <div className="text-xs space-y-0.5 mt-0.5">
+                                                                {isFuture && (
+                                                                    <p className="text-amber-600 font-bold flex items-center gap-1">
+                                                                        ⏳ Inicia: {dateUtils.formatDateUTC(startDate)}
+                                                                    </p>
                                                                 )}
-
-                                                                {isEnrolled ? (
-                                                                    <span className="text-xs text-emerald-600 font-bold px-2">✓ Inscrito</span>
-                                                                ) : (
-                                                                    <button
-                                                                        disabled={!canEnroll || bookingLoading}
-                                                                        onClick={() => handleEnroll(student)}
-                                                                        className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${canEnroll
-                                                                            ? 'bg-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white'
-                                                                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                                            }`}
-                                                                    >
-                                                                        Inscribir
-                                                                    </button>
+                                                                <p className={`${isFuture ? 'text-amber-600/70' : 'text-slate-400'}`}>
+                                                                    Finaliza: {dateUtils.formatDateUTC(endDate)}
+                                                                    {isExpired && (
+                                                                        <span className="ml-2 text-red-600 font-bold">(Expirado)</span>
+                                                                    )}
+                                                                </p>
+                                                                {!student && (
+                                                                    <p className="text-red-500 font-bold flex items-center gap-1">
+                                                                        ⚠️ Alumno no encontrado o eliminado
+                                                                    </p>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                    );
-                                                })
-                                            )
+
+                                                        <button
+                                                            onClick={() => handleUnenroll(enrollment.studentId, enrollment.studentName)}
+                                                            disabled={bookingLoading}
+                                                            className={`p-2 rounded-lg transition-colors ${isFuture
+                                                                ? 'text-amber-400 hover:text-red-600 hover:bg-amber-100'
+                                                                : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                                                            title="Desinscribir"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })
                                         )}
                                     </div>
 

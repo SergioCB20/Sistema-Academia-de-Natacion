@@ -78,6 +78,7 @@ export default function Schedule() {
     const [searchTerm, setSearchTerm] = useState('');
     const [bookingLoading, setBookingLoading] = useState(false);
 
+
     // Helper: Get start of week (Monday)
     const getStartOfWeek = (date: Date) => {
         const d = new Date(date);
@@ -212,21 +213,22 @@ export default function Schedule() {
         s.dni.includes(searchTerm)
     );
 
+
+
     const handleCancelBooking = async (student: Student) => {
         if (!selectedSlot) return;
 
         if (!confirm(`¿Eliminar a ${student.fullName} de esta clase?`)) return;
 
-        setBookingLoading(true);
+
         try {
             // TODO: Implement cancel booking with monthly_slots system
             alert('La funcionalidad de cancelación está temporalmente deshabilitada. Use el sistema de horarios mensuales.');
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Error al cancelar reserva");
-        } finally {
-            setBookingLoading(false);
         }
+
     };
 
 
