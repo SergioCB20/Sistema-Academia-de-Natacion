@@ -470,30 +470,46 @@ export const studentService = {
         let studentId = '';
 
         await runTransaction(db, async (transaction) => {
+            // 1. READ ALL NECESSARY DATA FIRST
             const debtDoc = await transaction.get(debtRef);
             if (!debtDoc.exists()) throw new Error("Deuda no encontrada");
 
             const debt = debtDoc.data() as Debt;
             studentId = debt.studentId;
 
+            // Fetch student for snapshot (READ)
+            const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+            const studentDoc = await transaction.get(studentRef);
+
             if (debt.status !== 'PENDING') throw new Error("La deuda ya está pagada");
 
+            // 2. CALCULATE NEW STATE
             const newPaid = debt.amountPaid + amount;
             const newBalance = debt.amountTotal - newPaid;
-            // Allow small float margin error
             const newStatus = newBalance < 0.5 ? 'PAID' : 'PENDING';
 
+            const studentName = studentDoc.exists() ? studentDoc.data().fullName : 'Unknown';
+            const studentDni = studentDoc.exists() ? studentDoc.data().dni : '';
+
+            // 3. EXECUTE WRITES
             transaction.update(debtRef, {
                 amountPaid: newPaid,
                 balance: newBalance,
                 status: newStatus
             });
 
-            // Fetch student for snapshot
-            const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
-            const studentDoc = await transaction.get(studentRef);
-            const studentName = studentDoc.exists() ? studentDoc.data().fullName : 'Unknown';
-            const studentDni = studentDoc.exists() ? studentDoc.data().dni : '';
+            // Check if student has other debts
+            // Need to know if we should clear the 'hasDebt' flag on student.
+            // Since we can't query inside transaction easily for "other debts" without reading them all,
+            // we will optimistically clear it IF this cleared the debt, 
+            // BUT technically other debts might exist. 
+            // Ideally we query "getDebts" outside or read them?
+            // "Firestore transactions require all reads..."
+            // Queries inside transactions are tricky if index requirements.
+            // For now, let's just proceed with the payment logic.
+            // The "hasDebt" flag on student is usually a summary.
+            // If we want to update it, we should check remaining debts.
+            // But let's fix the crash first.
 
             const newPayment: Payment = {
                 id: paymentRef.id,

@@ -76,13 +76,7 @@ export default function Students() {
         newEndDate: ''
     });
 
-    // ATTENDANCE Modal State
-    const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
-    const [studentForAttendance, setStudentForAttendance] = useState<Student | null>(null);
-    const [attendanceData, setAttendanceData] = useState({
-        fecha: new Date().toISOString().split('T')[0], // Default to today
-        asistencia: true // Default to attended
-    });
+
 
     // Form Data
     const [formData, setFormData] = useState({
@@ -514,38 +508,7 @@ export default function Students() {
         }
     }, [rechargeData.credits, studentForRecharge, isRechargeModalOpen]);
 
-    // ATTENDANCE HANDLERS
-    const handleOpenAttendance = (student: Student) => {
-        setStudentForAttendance(student);
-        setAttendanceData({
-            fecha: new Date().toISOString().split('T')[0], // Reset to today
-            asistencia: true // Default to attended
-        });
-        setIsAttendanceModalOpen(true);
-    };
 
-    const handleAttendanceSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!studentForAttendance) return;
-        if (isSaving) return;
-
-        setIsSaving(true);
-        try {
-            await studentService.markAttendance(
-                studentForAttendance.id,
-                attendanceData.fecha,
-                attendanceData.asistencia
-            );
-
-            setIsAttendanceModalOpen(false);
-            loadStudents(); // Reload to show updated attendance
-        } catch (error: any) {
-            console.error(error);
-            alert(error.message || "Error al marcar asistencia");
-        } finally {
-            setIsSaving(false);
-        }
-    };
 
     // EXPORT TO EXCEL HANDLER
     const handleExportToExcel = () => {
@@ -877,14 +840,7 @@ export default function Students() {
                                     </span>
 
                                     <div className="flex gap-2">
-                                        <button
-                                            onClick={() => handleOpenAttendance(student)}
-                                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                                            title="Marcar Asistencia"
-                                        >
-                                            <CheckCircle className="w-4 h-4" />
-                                            Asistencia
-                                        </button>
+
                                         <button
                                             onClick={() => handleOpenRecharge(student)}
                                             className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
@@ -1611,101 +1567,7 @@ export default function Students() {
                 </div>
             )}
 
-            {/* ATTENDANCE MODAL */}
-            {isAttendanceModalOpen && studentForAttendance && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="p-6 border-b border-slate-100 bg-emerald-50/50">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <h3 className="text-xl font-bold text-slate-800">Marcar Asistencia</h3>
-                                    <p className="text-sm text-slate-500 mt-1">{studentForAttendance.fullName}</p>
-                                </div>
-                                <button
-                                    onClick={() => setIsAttendanceModalOpen(false)}
-                                    className="text-slate-400 hover:text-slate-600 transition-colors"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                        </div>
 
-                        <form onSubmit={handleAttendanceSubmit} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">Fecha</label>
-                                <input
-                                    type="date"
-                                    required
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/50 outline-none"
-                                    value={attendanceData.fecha}
-                                    onChange={e => setAttendanceData({ ...attendanceData, fecha: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">Estado</label>
-                                <div className="flex gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setAttendanceData({ ...attendanceData, asistencia: true })}
-                                        className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${attendanceData.asistencia
-                                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                            }`}
-                                    >
-                                        ✅ Asistió
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setAttendanceData({ ...attendanceData, asistencia: false })}
-                                        className={`flex-1 px-4 py-3 rounded-xl font-medium transition-all ${!attendanceData.asistencia
-                                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                            }`}
-                                    >
-                                        ❌ Faltó
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Attendance History */}
-                            {studentForAttendance.asistencia && studentForAttendance.asistencia.length > 0 && (
-                                <div className="border-t border-slate-100 pt-4">
-                                    <h4 className="text-sm font-bold text-slate-700 mb-3">Historial de Asistencia</h4>
-                                    <div className="max-h-48 overflow-y-auto space-y-2">
-                                        {studentForAttendance.asistencia.slice(0, 15).map((record, index) => (
-                                            <div
-                                                key={index}
-                                                className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg"
-                                            >
-                                                <span className="text-sm text-slate-600 font-mono">
-                                                    {new Date(record.fecha).toLocaleDateString('es-PE', {
-                                                        day: '2-digit',
-                                                        month: 'short',
-                                                        year: 'numeric'
-                                                    })}
-                                                </span>
-                                                <span className={`text-sm font-bold ${record.asistencia ? 'text-emerald-600' : 'text-red-600'
-                                                    }`}>
-                                                    {record.asistencia ? '✅ Asistió' : '❌ Faltó'}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={isSaving}
-                                className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 mt-4"
-                            >
-                                {isSaving ? 'Guardando...' : 'Guardar Asistencia'}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
         </div >
     );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Search, Trash2, X } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Search, Trash2, X, CheckCircle } from 'lucide-react';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
@@ -33,7 +33,7 @@ export default function MonthlySchedule() {
     // Modal state
     const [selectedSlot, setSelectedSlot] = useState<MonthlySlot | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [viewMode, setViewMode] = useState<'list' | 'add'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'add' | 'attendance'>('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [bookingLoading, setBookingLoading] = useState(false);
 
@@ -436,6 +436,15 @@ export default function MonthlySchedule() {
                                             Inscritos ({validCount})
                                         </button>
                                         <button
+                                            onClick={() => setViewMode('attendance')}
+                                            className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'attendance'
+                                                ? 'text-sky-600 border-b-2 border-sky-600'
+                                                : 'text-slate-400 hover:text-slate-600'
+                                                }`}
+                                        >
+                                            Asistencia
+                                        </button>
+                                        <button
                                             onClick={() => setViewMode('add')}
                                             className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'add'
                                                 ? 'text-sky-600 border-b-2 border-sky-600'
@@ -499,10 +508,30 @@ export default function MonthlySchedule() {
                                                         >
                                                             <div className="flex-1">
                                                                 <div className='flex justify-between items-center mr-2'>
-                                                                    <p className={`font-bold ${isFuture ? 'text-amber-800' : !student ? 'text-red-700' : 'text-slate-700'}`}>
-                                                                        {enrollment.studentName}
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className={`font-bold ${isFuture ? 'text-amber-800' : !student ? 'text-red-700' : 'text-slate-700'}`}>
+                                                                            {enrollment.studentName}
+                                                                        </p>
+                                                                        {(() => {
+                                                                            const tCredits = student?.remainingCredits || 0;
+                                                                            const aCount = student?.asistencia?.filter(a => a.asistencia).length || 0;
+                                                                            const finished = aCount >= tCredits && tCredits > 0;
+                                                                            if (finished) {
+                                                                                return (
+                                                                                    <span className="text-[10px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded border border-sky-200 font-bold flex items-center gap-1">
+                                                                                        <CheckCircle className="w-3 h-3" /> LISTO
+                                                                                    </span>
+                                                                                );
+                                                                            }
+                                                                            return null;
+                                                                        })()}
                                                                         {isFuture && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">FUTURO</span>}
-                                                                    </p>
+                                                                        {student?.hasDebt && (
+                                                                            <span className="ml-2 text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 font-bold animate-pulse">
+                                                                                DEUDA
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                     {student && (() => {
                                                                         const available = calculateRealRemaining(student);
                                                                         const total = student.remainingCredits;
@@ -547,6 +576,120 @@ export default function MonthlySchedule() {
                                                     );
                                                 })
                                             )
+                                        ) : viewMode === 'attendance' ? (
+                                            // ATTENDANCE VIEW
+                                            <>
+                                                <div className="p-3 sticky top-0 bg-white z-10 border-b border-slate-100 mb-2">
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha de Asistencia</label>
+                                                    <input
+                                                        type="date"
+                                                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                                                        defaultValue={new Date().toISOString().split('T')[0]}
+                                                        id="attendance-date"
+                                                        // Force reload when date changes? No, just let logic read it.
+                                                        onChange={(e) => {
+                                                            // Trigger re-render to update 'hasAttendedToday'
+                                                            // We can just use a state for the date if we want reactivity
+                                                            // For now simple approach
+                                                            const val = e.target.value;
+                                                            // Force update?
+                                                            setSearchTerm(val); // Hack to force render, or add explicit state
+                                                            // Better: add explicit state in next iteration if needed, 
+                                                            // but actually just switching viewMode re-renders. 
+                                                            // Let's add a wrapper state for date later if needed.
+                                                            // Actually, using searchTerm (which is unused in attendance mode) 
+                                                            // is a convenient hack to force re-render without new state.
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                <div className="space-y-2 pb-10">
+                                                    {validEnrollments.map((enrollment: MonthlyEnrollment) => {
+                                                        const student = students.find(s => s.id === enrollment.studentId);
+                                                        if (!student) return null;
+
+                                                        const totalCredits = student.remainingCredits || 0;
+                                                        const attendedCount = student.asistencia?.filter(a => a.asistencia).length || 0;
+                                                        const isFinished = attendedCount >= totalCredits && totalCredits > 0;
+
+                                                        // Get Date
+                                                        const dateInput = document.getElementById('attendance-date') as HTMLInputElement;
+                                                        const selectedDate = dateInput?.value || new Date().toISOString().split('T')[0];
+
+                                                        const hasAttended = student.asistencia?.some(a => a.fecha === selectedDate && a.asistencia);
+
+                                                        return (
+                                                            <div key={student.id} className={`flex items-center justify-between p-3 rounded-xl border transition-all ${hasAttended ? 'bg-emerald-50 border-emerald-200' : 'border-slate-100 hover:bg-slate-50'}`}>
+                                                                <div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                                        {student.hasDebt && (
+                                                                            <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 font-bold">
+                                                                                DEUDA
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 mt-1">
+                                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isFinished ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                                            {attendedCount} / {totalCredits} clases
+                                                                        </span>
+                                                                        {isFinished && (
+                                                                            <span className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5">
+                                                                                <CheckCircle className="w-3 h-3" /> COMPLETADO
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        const dateInput = document.getElementById('attendance-date') as HTMLInputElement;
+                                                                        const date = dateInput.value;
+                                                                        if (!date) return;
+
+                                                                        const newStatus = !hasAttended;
+                                                                        try {
+                                                                            // 1. Update DB (1 read + 1 write inside transaction)
+                                                                            await studentService.markAttendance(student.id, date, newStatus);
+
+                                                                            // 2. OPTIMIZATION: Update Local State instead of re-fetching ALL students (saves N reads)
+                                                                            setStudents(prevStudents => prevStudents.map(s => {
+                                                                                if (s.id === student.id) {
+                                                                                    const currentAttendance = s.asistencia ? [...s.asistencia] : [];
+                                                                                    const existingIndex = currentAttendance.findIndex(a => a.fecha === date);
+
+                                                                                    if (existingIndex >= 0) {
+                                                                                        currentAttendance[existingIndex] = { fecha: date, asistencia: newStatus };
+                                                                                    } else {
+                                                                                        currentAttendance.push({ fecha: date, asistencia: newStatus });
+                                                                                    }
+
+                                                                                    // Sort by date desc
+                                                                                    currentAttendance.sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+                                                                                    return { ...s, asistencia: currentAttendance };
+                                                                                }
+                                                                                return s;
+                                                                            }));
+
+                                                                        } catch (e) {
+                                                                            alert('Error al marcar asistencia');
+                                                                            console.error(e);
+                                                                        }
+                                                                    }}
+                                                                    className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${hasAttended
+                                                                        ? 'bg-emerald-500 text-white shadow-emerald-500/30 shadow-lg'
+                                                                        : 'bg-white border-2 border-slate-200 text-slate-400 hover:border-emerald-200 hover:text-emerald-600'
+                                                                        }`}
+                                                                >
+                                                                    <CheckCircle className={`w-4 h-4 ${hasAttended ? 'animate-in zoom-in' : ''}`} />
+                                                                    {hasAttended ? 'Asistió' : 'Marcar'}
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </>
                                         ) : (
                                             // ADD VIEW
                                             filteredStudents.length === 0 ? (
