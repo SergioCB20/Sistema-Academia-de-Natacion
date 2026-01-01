@@ -66,6 +66,10 @@ export default function Students() {
     const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
     const [selectedDebts, setSelectedDebts] = useState<Debt[]>([]);
     const [studentForDebt, setStudentForDebt] = useState<Student | null>(null);
+    // Partial Payment State
+    const [payingDebtId, setPayingDebtId] = useState<string | null>(null);
+    const [paymentPartialAmount, setPaymentPartialAmount] = useState('');
+    const [paymentPartialMethodId, setPaymentPartialMethodId] = useState('');
 
     // RECHARGE Modal State
     const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
@@ -423,27 +427,52 @@ export default function Students() {
         }
     };
 
-    const handlePayDebt = async (debt: Debt) => {
-        const amount = prompt(`Monto a pagar para esta deuda (Saldo: S/ ${debt.balance.toFixed(2)})`, debt.balance.toString());
-        if (!amount) return;
+    const handleStartDebtPayment = (debt: Debt) => {
+        setPayingDebtId(debt.id);
+        setPaymentPartialAmount(debt.balance.toString());
+        // Default to first active method or CASH
+        const defaultMethod = availablePaymentMethods.find(m => m.isActive)?.id || 'CASH';
+        setPaymentPartialMethodId(defaultMethod);
+    };
 
-        const payAmount = Number(amount);
+    const handleCancelDebtPayment = () => {
+        setPayingDebtId(null);
+        setPaymentPartialAmount('');
+        setPaymentPartialMethodId('');
+    };
+
+    const handleConfirmDebtPayment = async (debt: Debt) => {
+        const payAmount = Number(paymentPartialAmount);
         if (isNaN(payAmount) || payAmount <= 0) {
             alert("Monto inválido");
             return;
         }
 
+        if (payAmount > debt.balance) {
+            if (!confirm(`El monto (S/ ${payAmount}) es mayor al saldo pendiente (S/ ${debt.balance}). ¿Desea continuar y registrar un pago mayor?`)) {
+                return;
+            }
+        }
+
         try {
-            const defaultMethod = availablePaymentMethods.find(m => m.isActive)?.id || 'CASH';
-            await studentService.payDebt(debt.id, payAmount, defaultMethod);
-            alert("Deuda actualizada");
+            await studentService.payDebt(debt.id, payAmount, paymentPartialMethodId);
+            // alert("Pago registrado");
 
             const updatedDebts = await studentService.getDebts(studentForDebt!.dni);
             setSelectedDebts(updatedDebts);
 
+            // Close inline payment
+            handleCancelDebtPayment();
+
             if (updatedDebts.length === 0) {
                 loadStudents();
                 setIsDebtModalOpen(false);
+            } else {
+                // Refresh main list to update "hasDebt" status if needed (though existing logic handles only full clear usually)
+                // If partial payment, they still have debt probably, unless specific logic exists. 
+                // But we should refresh students to update balances if shown? 
+                // The students list shows "hasDebt" flag. If partial payment clears it, we need to refresh.
+                loadStudents();
             }
         } catch (e: any) {
             alert(e.message);
@@ -1492,12 +1521,60 @@ export default function Students() {
                                                 <p className="text-xs text-slate-400">Pagado: S/ {debt.amountPaid}</p>
                                                 <p className="text-lg font-bold text-slate-800 mt-1">Saldo: S/ {debt.balance.toFixed(2)}</p>
                                             </div>
-                                            <button
-                                                onClick={() => handlePayDebt(debt)}
-                                                className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20"
-                                            >
-                                                Pagar
-                                            </button>
+
+                                            {payingDebtId === debt.id ? (
+                                                <div className="flex flex-col gap-2 items-end animate-in fade-in zoom-in duration-200">
+                                                    <div className="flex gap-2">
+                                                        <div className="w-24">
+                                                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Monto (S/)</label>
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                className="w-full px-2 py-1 rounded border border-slate-300 text-sm"
+                                                                value={paymentPartialAmount}
+                                                                onChange={(e) => setPaymentPartialAmount(e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <div className="w-32">
+                                                            <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Método</label>
+                                                            <select
+                                                                className="w-full px-2 py-1 rounded border border-slate-300 text-sm"
+                                                                value={paymentPartialMethodId}
+                                                                onChange={(e) => setPaymentPartialMethodId(e.target.value)}
+                                                            >
+                                                                {availablePaymentMethods.filter(m => m.isActive).map(m => (
+                                                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={handleCancelDebtPayment}
+                                                            className="text-slate-400 hover:text-slate-600 text-xs underline"
+                                                        >
+                                                            Cancelar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleConfirmDebtPayment(debt)}
+                                                            className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-emerald-700 transition-colors"
+                                                        >
+                                                            Confirmar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleStartDebtPayment(debt)}
+                                                    disabled={payingDebtId !== null}
+                                                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-colors shadow-lg ${payingDebtId !== null
+                                                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                                                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
+                                                        }`}
+                                                >
+                                                    Pagar
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 ))
