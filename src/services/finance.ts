@@ -42,5 +42,31 @@ export const financeService = {
         });
 
         return dailyData;
+    },
+
+    async getDailyReportData(date: number, seasonId?: string) {
+        // Start and End of the selected day
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        const start = d.getTime();
+        d.setHours(23, 59, 59, 999);
+        const end = d.getTime();
+
+        let q = query(
+            collection(db, 'payments'),
+            where('date', '>=', start),
+            where('date', '<=', end)
+        );
+
+        // Fetch all payments for the day
+        const snap = await getDocs(q);
+        let payments = snap.docs.map(doc => doc.data() as Payment);
+
+        // Filter by season if provided
+        if (seasonId) {
+            payments = payments.filter(p => p.seasonId === seasonId);
+        }
+
+        return payments;
     }
 };

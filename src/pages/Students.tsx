@@ -544,8 +544,25 @@ export default function Students() {
 
 
     // EXPORT TO EXCEL HANDLER
-    const handleExportToExcel = () => {
+    const handleExportToExcel = async () => {
         try {
+            // Fetch all payments to calculate total paid per student
+            const { collection, getDocs } = await import('firebase/firestore');
+            const { db } = await import('../lib/firebase');
+
+            const paymentsSnapshot = await getDocs(collection(db, 'payments'));
+            const paymentsByStudent: Record<string, number> = {};
+
+            paymentsSnapshot.docs.forEach(doc => {
+                const payment = doc.data();
+                const studentId = payment.studentId;
+                const amount = payment.amount || 0;
+
+                if (studentId) {
+                    paymentsByStudent[studentId] = (paymentsByStudent[studentId] || 0) + amount;
+                }
+            });
+
             // Prepare data for export
             const exportData = students.map(student => {
                 const category = getCategoryById(student.categoryId);
@@ -563,6 +580,9 @@ export default function Students() {
                     ? student.asistencia.filter(a => a.asistencia === true).length
                     : 0;
 
+                // Get total amount paid for this student
+                const montoPagado = paymentsByStudent[student.id] || 0;
+
                 return {
                     'Codigo': student.studentCode || '',
                     'Nombre': student.fullName,
@@ -570,7 +590,9 @@ export default function Students() {
                     'Edad': student.age || '',
                     'Categoria': category?.name || '',
                     'Horario': horario,
-                    'Asistencia': asistenciaCount
+                    'Asistencia': asistenciaCount,
+                    'Clases Restantes': student.remainingCredits || 0,
+                    'Monto Pagado': montoPagado
                 };
             });
 
@@ -585,7 +607,9 @@ export default function Students() {
                 { wch: 6 },  // Edad
                 { wch: 20 }, // Categoria
                 { wch: 30 }, // Horario
-                { wch: 10 }  // Asistencia
+                { wch: 10 }, // Asistencia
+                { wch: 15 }, // Clases Restantes
+                { wch: 15 }  // Monto Pagado
             ];
 
             // Create workbook
@@ -1568,8 +1592,8 @@ export default function Students() {
                                                     onClick={() => handleStartDebtPayment(debt)}
                                                     disabled={payingDebtId !== null}
                                                     className={`px-3 py-2 rounded-lg text-sm font-bold transition-colors shadow-lg ${payingDebtId !== null
-                                                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
-                                                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
+                                                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                                                        : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
                                                         }`}
                                                 >
                                                     Pagar
