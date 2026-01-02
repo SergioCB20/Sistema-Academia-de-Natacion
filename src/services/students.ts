@@ -110,6 +110,7 @@ export const studentService = {
                     credits: credits,
                     method: method,
                     type: isPartial ? 'PARTIAL' : 'FULL',
+                    seasonId: studentData.seasonId, // Link payment to the student's season
                     date: Date.now(),
                     createdBy: 'admin'
                 };
@@ -253,6 +254,7 @@ export const studentService = {
                 credits,
                 method,
                 type: 'FULL', // Defaulting to FULL for credit addition
+                seasonId: data.seasonId,
                 date: Date.now(),
                 createdBy
             };
@@ -574,6 +576,7 @@ export const studentService = {
                 amount: amount,
                 method: method,
                 type: newStatus === 'PAID' ? 'FULL' : 'PARTIAL',
+                seasonId: studentDoc.exists() ? studentDoc.data().seasonId : undefined,
                 credits: 0,
                 date: Date.now(),
                 createdBy: 'admin'

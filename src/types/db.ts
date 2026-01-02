@@ -192,6 +192,7 @@ export interface Payment {
     method: PaymentMethod;
     type: PaymentType;
     credits: number; // How many credits this payment added (if PACK)
+    seasonId?: string; // Reference to Season
     date: number; // Timestamp
     createdBy: string; // User UID
 }

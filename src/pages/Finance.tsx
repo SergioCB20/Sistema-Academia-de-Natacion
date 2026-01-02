@@ -124,6 +124,21 @@ export default function Finance() {
                 </>
             )}
 
+            {/* Report Export Section */}
+            <div className="flex justify-end mb-4">
+                <button
+                    onClick={() => {
+                        if (confirm("¿Generar reporte de caja del día de hoy?")) {
+                            generateDailyReport();
+                        }
+                    }}
+                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium"
+                >
+                    <DollarSign className="w-4 h-4" />
+                    Exportar Reporte de Caja (Hoy)
+                </button>
+            </div>
+
             {/* CHART SECTION */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <div className="flex items-center justify-between mb-8">
@@ -182,4 +197,109 @@ export default function Finance() {
             </div>
         </div>
     );
+
+    async function generateDailyReport() {
+        try {
+            // Dynamically import xlsx
+            const XLSX = await import("xlsx");
+            const { seasonService } = await import("../services/seasonService");
+
+            // 1. Get Context
+            const activeSeason = await seasonService.getActiveSeason();
+            if (!activeSeason) throw new Error("No hay temporada activa para filtrar los pagos.");
+
+            // 2. Get Data
+            const today = Date.now(); // or let user select
+            const payments = await financeService.getDailyReportData(today, activeSeason.id);
+            const methods = await paymentMethodService.getAll();
+
+            if (payments.length === 0) {
+                alert("No hay pagos registrados para hoy en esta temporada.");
+                return;
+            }
+
+            // 3. Prepare Structure
+            // Header Row: [Empty, Method1, Method2, ..., 'TOTAL']
+            const headerRow = ["Alumno", ...methods.map(m => m.name), "TOTAL"];
+
+            const methodIndexMap = methods.reduce((acc: any, m, idx) => { acc[m.id] = idx; return acc; }, {});
+
+            // "Saldo Inicial" Row (Assuming 0 for now as requested format)
+            const initialBalanceRow = ["Saldo Inicial", ...methods.map(() => 0), 0];
+
+            // Data Rows
+            const rows: any[] = [];
+            const grandTotals = new Array(methods.length).fill(0);
+            let totalDaily = 0;
+
+            // Group by Student Name (or just list payments? "Nombre alumno 1")
+            // Assuming one row per payment? Or aggregate by student?
+            // "Nombre alumno 1, monto pagado..." implies aggregating if student paid multiple times? 
+            // Or just listing transactions. Listing transactions is safer usually.
+            // But if student paid partial + something else?
+            // Let's list each payment as a row, with Student Name.
+            // Actually, "Nombre alumno 1" implies grouping.
+
+            // Let's group by studentId for cleaner report
+            const studentPayments: Record<string, { name: string, amounts: number[] }> = {};
+
+            payments.forEach(p => {
+                const sId = p.studentId || "ANON";
+                if (!studentPayments[sId]) {
+                    studentPayments[sId] = {
+                        name: p.studentName || "Desconocido",
+                        amounts: new Array(methods.length).fill(0)
+                    };
+                }
+
+                // Find column index
+                let methodIdx = -1;
+                // Try to find by ID
+                if (methodIndexMap[p.method] !== undefined) {
+                    methodIdx = methodIndexMap[p.method];
+                } else {
+                    // Try to find by name match? or put in last?
+                    // If unknown method, maybe ignore or add to first?
+                    // Let's assume valid methods.
+                }
+
+                if (methodIdx !== -1) {
+                    studentPayments[sId].amounts[methodIdx] += p.amount;
+                    grandTotals[methodIdx] += p.amount;
+                    totalDaily += p.amount;
+                }
+            });
+
+            // Convert to Array Rows
+            Object.values(studentPayments).forEach(sp => {
+                const totalStudent = sp.amounts.reduce((a, b) => a + b, 0);
+                rows.push([sp.name, ...sp.amounts, totalStudent]);
+            });
+
+            // "Saldo Final" Row
+            // "saldo inicial + monto pagado en metodo..."
+            // Since Initial is 0, Final is just Total.
+            const finalBalanceRow = ["Saldo Final", ...grandTotals, totalDaily];
+
+            // 4. Generate Sheet
+            const dataMatrix = [
+                headerRow,
+                initialBalanceRow,
+                ...rows,
+                finalBalanceRow
+            ];
+
+            const ws = XLSX.utils.aoa_to_sheet(dataMatrix);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Reporte Diario");
+
+            // 5. Download
+            const dateStr = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `Reporte_Caja_${activeSeason.name}_${dateStr}.xlsx`);
+
+        } catch (error: any) {
+            console.error(error);
+            alert("Error generando reporte: " + error.message);
+        }
+    }
 }
