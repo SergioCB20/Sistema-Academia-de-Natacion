@@ -101,14 +101,41 @@ export default function Students() {
     const [fixedSchedule, setFixedSchedule] = useState<Array<{ dayId: string, timeId: string }>>([]);
 
     const [paymentData, setPaymentData] = useState({
-        amountPaid: '',
         totalCost: '0.00',
         credits: '12',
-        methodId: '', // Use ID instead of hardcoded type
         startDate: new Date().toISOString().split('T')[0],
         endDate: ''
     });
     const [availablePaymentMethods, setAvailablePaymentMethods] = useState<PaymentMethodConfig[]>([]);
+
+    // Multiple payment entries for registration
+    const [paymentEntries, setPaymentEntries] = useState<Array<{
+        id: string;
+        amount: string;
+        methodId: string;
+    }>>([]);
+
+    // Helper functions for payment entries
+    const addPaymentEntry = () => {
+        const defaultMethodId = availablePaymentMethods[0]?.id || '';
+        setPaymentEntries(prev => [
+            ...prev,
+            { id: `pay_${Date.now()}`, amount: '', methodId: defaultMethodId }
+        ]);
+    };
+
+    const removePaymentEntry = (entryId: string) => {
+        setPaymentEntries(prev => prev.filter(e => e.id !== entryId));
+    };
+
+    const updatePaymentEntry = (entryId: string, field: 'amount' | 'methodId', value: string) => {
+        setPaymentEntries(prev => prev.map(e =>
+            e.id === entryId ? { ...e, [field]: value } : e
+        ));
+    };
+
+    // Calculate total paid from all entries
+    const totalAmountPaid = paymentEntries.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
 
     useEffect(() => {
         loadCategories();
@@ -202,12 +229,13 @@ export default function Students() {
         }
     };
 
-    // Auto-select first payment method when loaded or when opening a new form
+    // Auto-select first payment method for entries if they are empty
     useEffect(() => {
-        if (availablePaymentMethods.length > 0 && !paymentData.methodId) {
-            setPaymentData(prev => ({ ...prev, methodId: availablePaymentMethods[0].id }));
+        if (isModalOpen && availablePaymentMethods.length > 0 && paymentEntries.length === 0) {
+            const defaultMethodId = availablePaymentMethods[0].id;
+            setPaymentEntries([{ id: `pay_${Date.now()}`, amount: '', methodId: defaultMethodId }]);
         }
-    }, [availablePaymentMethods, paymentData.methodId, isModalOpen]);
+    }, [availablePaymentMethods, isModalOpen, paymentEntries.length]);
 
     const loadAvailablePackages = async (categoryId: string) => {
         if (!activeSeason || !categoryId) return;
@@ -288,16 +316,17 @@ export default function Students() {
         });
         setFixedSchedule([]);
         setPaymentData({
-            amountPaid: '',
             totalCost: '0.00',
             credits: '0',
-            methodId: '', // The useEffect will pick the first one from availablePaymentMethods
             startDate: new Date().toISOString().split('T')[0],
             endDate: ''
         });
         setStep(1);
         setSelectedPackage(null);
         setRegisteredStudentDni(null);
+        // Initialize with one empty payment entry using first available method
+        const defaultMethodId = availablePaymentMethods[0]?.id || '';
+        setPaymentEntries([{ id: `pay_${Date.now()}`, amount: '', methodId: defaultMethodId }]);
         setIsModalOpen(true);
     };
 
@@ -354,6 +383,11 @@ export default function Students() {
             return;
         }
 
+        if (totalAmountPaid > Number(paymentData.totalCost)) {
+            alert("El monto pagado no puede ser mayor al costo total.");
+            return;
+        }
+
         if (isSubmittingRef.current || isSaving) return;
         isSubmittingRef.current = true;
         setIsSaving(true);
@@ -393,10 +427,15 @@ export default function Students() {
                     packageStartDate: packageStartDate || null,
                     packageEndDate: packageEndDate || null
                 }, {
-                    amountPaid: Number(paymentData.amountPaid) || 0,
                     totalCost: Number(paymentData.totalCost) || 0,
                     credits: Number(paymentData.credits) || 0,
-                    method: paymentData.methodId
+                    // Multiple payment entries
+                    payments: paymentEntries
+                        .filter(e => Number(e.amount) > 0) // Only include entries with amount
+                        .map(e => ({
+                            amount: Number(e.amount),
+                            method: e.methodId
+                        }))
                 });
 
                 // Go to step 4 (confirmation) instead of closing
@@ -745,7 +784,8 @@ export default function Students() {
         s.dni.includes(searchTerm)
     );
 
-    const debtAmount = Number(paymentData.totalCost) - Number(paymentData.amountPaid);
+    const isOverpaid = totalAmountPaid > Number(paymentData.totalCost);
+    const debtAmount = Number(paymentData.totalCost) - totalAmountPaid;
 
     const currentCategory = formData.categoryId ? getCategoryById(formData.categoryId) : null;
 
@@ -1329,40 +1369,87 @@ export default function Students() {
                                                 </div>
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div className="space-y-1">
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">A Cuenta (Pagado)</label>
-                                                    <div className="relative">
-                                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">S/</span>
-                                                        <input
-                                                            type="number"
-                                                            className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-emerald-600"
-                                                            value={paymentData.amountPaid}
-                                                            placeholder="0.00"
-                                                            onChange={e => setPaymentData({ ...paymentData, amountPaid: e.target.value })}
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Método de Pago</label>
-                                                    <select
-                                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white font-bold text-slate-700"
-                                                        value={paymentData.methodId}
-                                                        onChange={e => setPaymentData({ ...paymentData, methodId: e.target.value })}
+                                            <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Desglose de Pagos</label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={addPaymentEntry}
+                                                        className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-1 rounded-lg hover:bg-sky-200 transition-colors flex items-center gap-1"
                                                     >
-                                                        {availablePaymentMethods.length === 0 && (
-                                                            <option value="">No hay métodos de pago</option>
-                                                        )}
-                                                        {availablePaymentMethods.map(m => (
-                                                            <option key={m.id} value={m.id}>
-                                                                {m.name.toUpperCase()}
-                                                            </option>
-                                                        ))}
-                                                    </select>
+                                                        <Plus className="w-3 h-3" /> AGREGAR PAGO
+                                                    </button>
                                                 </div>
+
+                                                {paymentEntries.length === 0 && (
+                                                    <p className="text-center py-4 text-xs text-slate-400 italic">No se han registrado pagos aún.</p>
+                                                )}
+
+                                                {paymentEntries.map((entry) => (
+                                                    <div key={entry.id} className="grid grid-cols-12 gap-2 items-end animate-in fade-in slide-in-from-left-2 duration-200">
+                                                        <div className="col-span-5 space-y-1">
+                                                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Monto</label>
+                                                            <div className="relative">
+                                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">S/</span>
+                                                                <input
+                                                                    type="number"
+                                                                    className={`w-full pl-8 pr-2 py-2 rounded-xl border focus:outline-none focus:ring-2 focus:ring-sky-500/50 font-bold text-sm ${isOverpaid ? 'border-red-300 bg-red-50 text-red-600' : 'border-slate-200 text-emerald-600'}`}
+                                                                    value={entry.amount}
+                                                                    placeholder="0.00"
+                                                                    onChange={e => updatePaymentEntry(entry.id, 'amount', e.target.value)}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="col-span-6 space-y-1">
+                                                            <label className="block text-[10px] font-bold text-slate-400 uppercase">Método</label>
+                                                            <select
+                                                                className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 bg-white font-bold text-slate-700 text-sm"
+                                                                value={entry.methodId}
+                                                                onChange={e => updatePaymentEntry(entry.id, 'methodId', e.target.value)}
+                                                            >
+                                                                {availablePaymentMethods.map(m => (
+                                                                    <option key={m.id} value={m.id}>{m.name.toUpperCase()}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        <div className="col-span-1 pb-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removePaymentEntry(entry.id)}
+                                                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                                title="Eliminar"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                {paymentEntries.length > 0 && (
+                                                    <div className={`pt-2 border-t flex justify-between items-center ${isOverpaid ? 'border-red-200' : 'border-slate-200'}`}>
+                                                        <span className={`text-xs font-bold uppercase ${isOverpaid ? 'text-red-500' : 'text-slate-500'}`}>
+                                                            {isOverpaid ? '❌ Exceso Detectado:' : 'Total Pagado:'}
+                                                        </span>
+                                                        <span className={`text-sm font-black ${isOverpaid ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                            S/ {totalAmountPaid.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
 
-                                            {debtAmount > 0 && (
+                                            {isOverpaid ? (
+                                                <div className="bg-red-50 p-4 rounded-xl border border-red-200 flex items-center gap-3 animate-in zoom-in-95">
+                                                    <div className="w-10 h-10 bg-red-200/50 rounded-full flex items-center justify-center">
+                                                        <AlertTriangle className="w-5 h-5 text-red-700" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[10px] text-red-600 uppercase font-black">Error de Monto</p>
+                                                        <p className="text-xs font-bold text-red-900 leading-tight">
+                                                            El total pagado excede el costo total por S/ {(totalAmountPaid - Number(paymentData.totalCost)).toFixed(2)}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ) : debtAmount > 0 && (
                                                 <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 flex justify-between items-center animate-in zoom-in-95">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-10 h-10 bg-amber-200/50 rounded-full flex items-center justify-center">

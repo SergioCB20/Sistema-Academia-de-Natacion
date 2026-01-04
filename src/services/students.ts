@@ -23,15 +23,19 @@ const PAYMENTS_COLLECTION = 'payments';
 export const studentService = {
     /**
      * Creates a new student with optional initial payment.
-     * Transactional: Creates Student + Payment + Debt (if applicable)
+     * Transactional: Creates Student + Payment(s) + Debt (if applicable)
+     * Supports multiple payment methods in a single registration.
      */
     async create(
         studentData: Omit<Student, 'active' | 'remainingCredits' | 'hasDebt' | 'createdAt'>,
         paymentData?: {
-            amountPaid: number,
             totalCost: number,
             credits: number, // credits to assign
-            method: PaymentMethod
+            // Multiple payments support
+            payments: Array<{
+                amount: number,
+                method: PaymentMethod
+            }>
         }
     ): Promise<void> {
         // 0. Pre-validate Schedule Availability
@@ -50,7 +54,6 @@ export const studentService = {
 
         // Use id field for document reference (handles empty DNI case)
         const studentRef = doc(db, STUDENTS_COLLECTION, studentData.id);
-        const paymentRef = doc(collection(db, PAYMENTS_COLLECTION));
         const debtRef = doc(collection(db, 'debts'));
         const metadataRef = doc(db, 'metadata', 'counters'); // Global counters doc
 
@@ -92,29 +95,39 @@ export const studentService = {
             let remainingCredits = 0;
             let hasDebt = false;
 
-            // 4. Handle Payment Logic (WRITES)
+            // 4. Handle Payment Logic (WRITES) - Now supports multiple payments
             if (paymentData) {
-                const { amountPaid, totalCost, credits, method } = paymentData;
+                const { totalCost, credits, payments } = paymentData;
                 remainingCredits = credits;
 
-                const isPartial = amountPaid < totalCost;
+                // Calculate total amount paid from all payment entries
+                const totalAmountPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+                const isPartial = totalAmountPaid < totalCost;
                 hasDebt = isPartial;
 
-                // Create Payment Log
-                const newPayment: Payment = {
-                    id: paymentRef.id,
-                    studentId: studentData.id,
-                    studentName: studentData.fullName,
-                    studentDni: studentData.dni || studentData.id,
-                    amount: amountPaid,
-                    credits: credits,
-                    method: method,
-                    type: isPartial ? 'PARTIAL' : 'FULL',
-                    seasonId: studentData.seasonId, // Link payment to the student's season
-                    date: Date.now(),
-                    createdBy: 'admin'
-                };
-                transaction.set(paymentRef, newPayment);
+                // Create a Payment record for EACH payment entry
+                for (const paymentEntry of payments) {
+                    if (paymentEntry.amount <= 0) continue; // Skip zero/negative amounts
+
+                    const paymentRef = doc(collection(db, PAYMENTS_COLLECTION));
+                    const newPayment: Payment = {
+                        id: paymentRef.id,
+                        studentId: studentData.id,
+                        studentName: studentData.fullName,
+                        studentDni: studentData.dni || studentData.id,
+                        amount: paymentEntry.amount,
+                        credits: 0, // Credits are assigned to student, not split per payment
+                        method: paymentEntry.method,
+                        type: isPartial ? 'PARTIAL' : 'FULL',
+                        seasonId: studentData.seasonId, // Link payment to the student's season
+                        date: Date.now(),
+                        createdBy: 'admin'
+                    };
+                    transaction.set(paymentRef, newPayment);
+                }
+
+                // Assign credits to the first payment record for reference
+                // (or we could skip this since credits go to student directly)
 
                 // Create Debt Record if partial
                 if (isPartial) {
@@ -125,8 +138,8 @@ export const studentService = {
                         studentDni: studentData.dni || studentData.id,
                         slotId: 'MATRICULA_INICIAL',
                         amountTotal: totalCost,
-                        amountPaid: amountPaid,
-                        balance: totalCost - amountPaid,
+                        amountPaid: totalAmountPaid,
+                        balance: totalCost - totalAmountPaid,
                         dueDate: Date.now() + (7 * 24 * 60 * 60 * 1000),
                         status: 'PENDING'
                     };
