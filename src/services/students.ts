@@ -10,8 +10,9 @@ import {
     orderBy,
     limit,
     runTransaction,
-    increment, // <-- AGREGAR ESTO
-    deleteDoc // <-- Added for deletion
+    increment,
+    deleteDoc,
+    Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -30,108 +31,102 @@ export const studentService = {
         studentData: Omit<Student, 'active' | 'remainingCredits' | 'hasDebt' | 'createdAt'>,
         paymentData?: {
             totalCost: number,
-            credits: number, // credits to assign
-            // Multiple payments support
+            credits: number,
             payments: Array<{
                 amount: number,
                 method: PaymentMethod
             }>
         }
     ): Promise<void> {
-        // 0. Pre-validate Schedule Availability
-        // This ensures we don't create a student if the dates/schedule are invalid
-        if (studentData.fixedSchedule && studentData.fixedSchedule.length > 0) {
-            console.log("Checking schedule availability...", studentData.fixedSchedule, studentData.packageStartDate);
-            await this.validateScheduleAvailability(
-                studentData.fixedSchedule,
-                studentData.packageStartDate,
-                studentData.packageEndDate
-            );
-            console.log("Schedule availability check passed.");
-        } else {
-            console.log("Skipping schedule check: No fixed schedule provided.", studentData);
-        }
+        const { seasonService } = await import('./seasonService');
+
+        // 1. PRE-FETCH DATA (Before Transaction)
+        const activeSeason = await seasonService.getActiveSeason();
+        if (!activeSeason) throw new Error('No hay temporada activa.');
+
+        // Get matching slots and check availability upfront
+        const slotsInfo = await this._getMatchingSlots(
+            activeSeason,
+            studentData.fixedSchedule || [],
+            studentData.packageStartDate,
+            studentData.packageEndDate,
+            studentData.categoryId
+        );
+        const { matchingSlots } = slotsInfo;
+
+        // Fetch ALL active student IDs once to use in capacity checks inside transaction
+        const studentsSnapshot = await getDocs(query(collection(db, STUDENTS_COLLECTION), where('active', '==', true)));
+        const activeIds = new Set(studentsSnapshot.docs.map(d => d.id));
 
         // Use id field for document reference (handles empty DNI case)
         const studentRef = doc(db, STUDENTS_COLLECTION, studentData.id);
         const debtRef = doc(collection(db, 'debts'));
-        const metadataRef = doc(db, 'metadata', 'counters'); // Global counters doc
+        const metadataRef = doc(db, 'metadata', 'counters');
 
+        // 2. RUN ATOMIC TRANSACTION
         await runTransaction(db, async (transaction) => {
-            // 1. Check if student exists (READ 1)
-            const existing = await transaction.get(studentRef);
-            if (existing.exists()) {
-                throw new Error("El alumno ya existe (DNI duplicado).");
+            // --- ALL READS MUST COME FIRST ---
+
+            // 1. Check for duplicate student
+            const studentDoc = await transaction.get(studentRef);
+            if (studentDoc.exists()) {
+                throw new Error("El alumno ya existe o se ha intentado guardar dos veces.");
             }
 
-            // 2. Get Metadata Counter (READ 2)
+            // 2. Get next student code
             const metadataDoc = await transaction.get(metadataRef);
 
-            // --- END OF READS ---
+            // 3. READ ALL SLOTS (REQUIRED BY FIRESTORE)
+            const slotDataList: Array<{ ref: any, data: any }> = [];
+            for (const slotStub of matchingSlots) {
+                const slotRef = doc(db, 'monthly_slots', slotStub.id);
+                const slotDoc = await transaction.get(slotRef);
+                if (slotDoc.exists()) {
+                    slotDataList.push({ ref: slotRef, data: slotDoc.data() });
+                }
+            }
 
-            // 3. Prepare Code
-            let nextCode = "000001";
+            // --- END OF READS. NOW WRITES ONLY ---
+
+            let nextCount = 1;
             if (metadataDoc.exists()) {
-                const currentCount = metadataDoc.data().students || 0;
-                const nextCount = currentCount + 1;
-                nextCode = nextCount.toString().padStart(6, '0');
-                transaction.update(metadataRef, {
-                    students: nextCount,
-                    activeStudents: increment(1)
-                });
-            } else {
-                transaction.set(metadataRef, {
-                    students: 1,
-                    activeStudents: 1
-                });
+                nextCount = (metadataDoc.data().students || 0) + 1;
             }
+            const studentCode = nextCount.toString().padStart(6, '0');
 
-
-            // 1.5 Validate Capacity (Logic only, no DB reads in transaction)
-            if (studentData.fixedSchedule && studentData.fixedSchedule.length > 0) {
-                // Placeholder
-            }
-
+            // --- CALCULATIONS ---
             let remainingCredits = 0;
             let hasDebt = false;
 
-            // 4. Handle Payment Logic (WRITES) - Now supports multiple payments
             if (paymentData) {
                 const { totalCost, credits, payments } = paymentData;
                 remainingCredits = credits;
-
-                // Calculate total amount paid from all payment entries
                 const totalAmountPaid = payments.reduce((sum, p) => sum + p.amount, 0);
                 const isPartial = totalAmountPaid < totalCost;
                 hasDebt = isPartial;
 
-                // Create a Payment record for EACH payment entry
+                // Create Payments
                 for (const paymentEntry of payments) {
-                    if (paymentEntry.amount <= 0) continue; // Skip zero/negative amounts
-
+                    if (paymentEntry.amount <= 0) continue;
                     const paymentRef = doc(collection(db, PAYMENTS_COLLECTION));
-                    const newPayment: Payment = {
+                    transaction.set(paymentRef, {
                         id: paymentRef.id,
                         studentId: studentData.id,
                         studentName: studentData.fullName,
                         studentDni: studentData.dni || studentData.id,
                         amount: paymentEntry.amount,
-                        credits: 0, // Credits are assigned to student, not split per payment
+                        credits: 0,
                         method: paymentEntry.method,
                         type: isPartial ? 'PARTIAL' : 'FULL',
-                        seasonId: studentData.seasonId, // Link payment to the student's season
+                        seasonId: studentData.seasonId,
                         date: Date.now(),
                         createdBy: 'admin'
-                    };
-                    transaction.set(paymentRef, newPayment);
+                    });
                 }
 
-                // Assign credits to the first payment record for reference
-                // (or we could skip this since credits go to student directly)
-
-                // Create Debt Record if partial
+                // Create Debt if partial
                 if (isPartial) {
-                    const newDebt: Debt = {
+                    transaction.set(debtRef, {
                         id: debtRef.id,
                         studentId: studentData.id,
                         studentName: studentData.fullName,
@@ -142,25 +137,63 @@ export const studentService = {
                         balance: totalCost - totalAmountPaid,
                         dueDate: Date.now() + (7 * 24 * 60 * 60 * 1000),
                         status: 'PENDING'
-                    };
-                    transaction.set(debtRef, newDebt);
+                    });
                 }
             }
 
-            // 5. Create Student (WRITE)
+            // Create Student
             const finalDni = studentData.dni || studentData.id;
-
             const newStudent: Student = {
                 ...studentData,
                 dni: finalDni,
                 active: true,
                 remainingCredits: remainingCredits,
                 hasDebt: hasDebt,
-                studentCode: nextCode,
+                studentCode: studentCode,
                 createdAt: Date.now(),
-                asistencia: [] // Initialize empty attendance array
+                asistencia: []
             };
             transaction.set(studentRef, newStudent);
+
+            // Update Global Counter
+            transaction.set(metadataRef, {
+                students: nextCount,
+                activeStudents: increment(1)
+            }, { merge: true });
+
+            // ENROLL IN SLOTS
+            const reqDateStr = studentData.packageStartDate || new Date().toISOString().split('T')[0];
+            const requestedStartDate = new Date(`${reqDateStr}T00:00:00`);
+
+            for (const slotInfo of slotDataList) {
+                const { ref: slotRef, data: slot } = slotInfo;
+
+                // Final Capacity Check inside transaction
+                const activeEnrollments = (slot.enrolledStudents || []).filter((e: any) => {
+                    if (!activeIds.has(e.studentId)) return false;
+                    const endDate = e.endsAt?.toDate ? e.endsAt.toDate() : new Date(e.endsAt);
+                    return endDate >= requestedStartDate;
+                });
+
+                if (activeEnrollments.length >= slot.capacity) {
+                    throw new Error(`${slot.month}: El horario se llenó en el último segundo.`);
+                }
+
+                // Append new enrollment
+                const newEnrollment = {
+                    studentId: studentData.id,
+                    studentName: studentData.fullName,
+                    enrolledAt: Timestamp.fromDate(requestedStartDate),
+                    endsAt: studentData.packageEndDate ? Timestamp.fromDate(new Date(`${studentData.packageEndDate}T23:59:59`)) : Timestamp.fromDate(requestedStartDate),
+                    creditsAllocated: 0,
+                    attendanceRecord: []
+                };
+
+                transaction.update(slotRef, {
+                    enrolledStudents: [...(slot.enrolledStudents || []), newEnrollment],
+                    updatedAt: Timestamp.now()
+                });
+            }
         });
 
         // Log Activity
@@ -168,19 +201,6 @@ export const studentService = {
             `Nuevo alumno registrado: ${studentData.fullName}`,
             'SUCCESS'
         );
-
-
-        // Post-creation: Sync fixed schedule to existing monthly slots
-        if (studentData.fixedSchedule && studentData.fixedSchedule.length > 0) {
-            // DO NOT CATCH - let validation errors propagate to UI
-            await this.syncFixedScheduleToMonthlySlots(
-                studentData.id,
-                studentData.fixedSchedule,
-                studentData.packageEndDate,
-                studentData.packageStartDate,
-                studentData.categoryId
-            );
-        }
     },
 
     /**
@@ -811,10 +831,21 @@ export const studentService = {
         // Capacity Check 
         const requestedStartDate = packageStartDate ? new Date(`${packageStartDate}T00:00:00`) : new Date();
 
+        // Fetch ALL active student IDs to ensure we only count real, active students
+        const studentsQ = query(
+            collection(db, 'students'),
+            where('active', '==', true)
+        );
+        const studentsSnap = await getDocs(studentsQ);
+        const activeStudentIds = new Set(studentsSnap.docs.map(d => d.id));
+
         const fullSlots = matchingSlots.filter(s => {
             const enrolled = s.enrolledStudents || [];
             let activeCount = 0;
             enrolled.forEach((enrollment: any) => {
+                // ONLY count if student is marked as active in DB
+                if (!activeStudentIds.has(enrollment.studentId)) return;
+
                 const endDate = enrollment.endsAt?.toDate ? enrollment.endsAt.toDate() : new Date(enrollment.endsAt);
                 if (endDate >= requestedStartDate) activeCount++;
             });
