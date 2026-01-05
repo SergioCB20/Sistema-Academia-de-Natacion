@@ -240,17 +240,20 @@ export default function Schedule() {
         return 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm';
     };
 
-    // Derived state: Get unique time slots from loaded data
-    const timeRows = Array.from(new Set(slots.map(s => s.timeSlot || s.timeId)))
-        .sort((a, b) => (a || '').localeCompare(b || ''))
-        .map(timeId => {
-            // Find a slot with this ID to get the label/details if needed
-            const sample = slots.find(s => s.timeSlot === timeId || s.timeId === timeId);
-            return {
-                id: timeId,
-                label: sample?.timeSlot || timeId
-            };
-        });
+    const getHourGroup = (timeSlot?: string) => {
+        const match = (timeSlot || '').trim().match(/^(\d{1,2}):/);
+        if (!match) return timeSlot || '00:00';
+        const hour = match[1].padStart(2, '0');
+        return `${hour}:00`;
+    };
+
+    // Derived state: Get unique hours from loaded data (e.g. "13:00")
+    const timeRows = Array.from(new Set(slots.map(s => getHourGroup((s.timeSlot || s.timeId) || ''))))
+        .sort((a, b) => a.localeCompare(b))
+        .map(hourId => ({
+            id: hourId,
+            label: hourId
+        }));
 
     return (
         <div className="space-y-6 h-[calc(100vh-100px)] flex flex-col">
@@ -312,61 +315,67 @@ export default function Schedule() {
                             timeRows.map(hour => (
                                 <div key={hour.id} className="grid grid-cols-8 hover:bg-slate-50/30 transition-colors">
                                     <div className="p-3 text-xs font-bold text-slate-400 border-r border-slate-100 flex items-center justify-center font-mono bg-slate-50/30">
-                                        {hour.label?.split(' - ')[0] || hour.id}
+                                        {hour.label}
                                     </div>
                                     {weekDays.map((day, i) => {
                                         const dateStr = dateUtils.formatDateId(day);
-                                        // Match by timeSlot or timeId
-                                        const slot = slots.find(s => s.date === dateStr && (s.timeSlot === hour.id || s.timeId === hour.id));
+                                        // Find all slots for this day that start within this hour row
+                                        const slotsInHour = slots.filter(s =>
+                                            s.date === dateStr &&
+                                            getHourGroup(s.timeSlot || s.timeId) === hour.id
+                                        ).sort((a, b) => (a.timeSlot || '').localeCompare(b.timeSlot || ''));
 
-                                        if (!slot) return (
+                                        if (slotsInHour.length === 0) return (
                                             <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]"></div>
                                         );
 
-                                        if (slot.isBreak) {
-                                            return (
-                                                <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
-                                                    <div className="w-full h-full rounded-lg bg-slate-100 border border-slate-200 p-2 flex flex-col justify-center items-center opacity-75 cursor-not-allowed">
-                                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                                            Descanso
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-
-                                        const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
-                                        const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
-                                        const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
-
                                         return (
-                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px]">
-                                                <button
-                                                    onClick={() => openBookingModal(slot)}
-                                                    className={`w-full h-full rounded-lg border p-2 flex flex-col justify-between transition-all ${hasDebtor
-                                                        ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
-                                                        : colorClass
-                                                        }`}
-                                                >
-                                                    <div className="flex items-center justify-between w-full">
-                                                        <span className={`text-[10px] font-bold opacity-70 ${hasDebtor ? 'text-orange-900' : ''}`}>
-                                                            {hour.label?.split(' - ')[0] || hour.id}
-                                                        </span>
-                                                        {isFull && !hasDebtor && <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">FULL</span>}
-                                                        {hasDebtor && <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>}
-                                                    </div>
+                                            <div key={i} className="p-1 border-l border-slate-100 min-h-[80px] flex flex-col gap-1">
+                                                {slotsInHour.map(slot => {
+                                                    if (slot.isBreak) {
+                                                        return (
+                                                            <div key={slot.id} className="w-full min-h-[40px] rounded-lg bg-slate-100 border border-slate-200 p-2 flex flex-col justify-center items-center opacity-75 cursor-not-allowed">
+                                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                                    Descanso
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    }
 
-                                                    <div className="flex items-center gap-1.5 self-end">
-                                                        {hasDebtor ? (
-                                                            <DollarSign className="w-3 h-3 text-orange-600 animate-pulse" />
-                                                        ) : (
-                                                            <Users className="w-3 h-3" />
-                                                        )}
-                                                        <span className={`text-xs font-bold font-mono ${hasDebtor ? 'text-orange-900' : ''}`}>
-                                                            {slot.attendeeIds?.length ?? 0}/{slot.capacity}
-                                                        </span>
-                                                    </div>
-                                                </button>
+                                                    const isFull = (slot.attendeeIds?.length ?? 0) >= slot.capacity;
+                                                    const colorClass = getStatusColor(slot.capacity, slot.attendeeIds?.length ?? 0);
+                                                    const hasDebtor = slot.attendeeIds?.some(id => students.find(s => s.id === id)?.hasDebt);
+
+                                                    return (
+                                                        <button
+                                                            key={slot.id}
+                                                            onClick={() => openBookingModal(slot)}
+                                                            className={`w-full min-h-[60px] rounded-lg border p-2 flex flex-col justify-between transition-all ${hasDebtor
+                                                                ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 z-10'
+                                                                : colorClass
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between w-full">
+                                                                <span className={`text-[9px] font-bold opacity-70 ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                    {slot.timeSlot || slot.timeId}
+                                                                </span>
+                                                                {isFull && !hasDebtor && <span className="text-[9px] font-bold bg-white/50 px-1 rounded">FULL</span>}
+                                                                {hasDebtor && <span className="text-[9px] font-bold bg-white/50 text-orange-800 px-1 rounded animate-pulse">DEUDA</span>}
+                                                            </div>
+
+                                                            <div className="flex items-center gap-1.5 self-end">
+                                                                {hasDebtor ? (
+                                                                    <DollarSign className="w-3 h-3 text-orange-600 animate-pulse" />
+                                                                ) : (
+                                                                    <Users className="w-3 h-3" />
+                                                                )}
+                                                                <span className={`text-xs font-bold font-mono ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                    {slot.attendeeIds?.length ?? 0}/{slot.capacity}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         );
                                     })}

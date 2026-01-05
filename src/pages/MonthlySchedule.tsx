@@ -202,12 +202,19 @@ export default function MonthlySchedule() {
         return 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm';
     };
 
-    // Group slots by timeSlot and dayType (allowing multiple slots/categories per cell)
+    const getHourGroup = (timeSlot: string) => {
+        const match = (timeSlot || '').trim().match(/^(\d{1,2}):/);
+        if (!match) return timeSlot || '00:00';
+        const hour = match[1].padStart(2, '0');
+        return `${hour}:00`;
+    };
+
+    // Group slots by start hour and dayType (allowing multiple slots/categories per cell)
     const groupedSlots = slots.reduce((acc, slot) => {
-        const key = slot.timeSlot;
-        if (!acc[key]) acc[key] = {};
-        if (!acc[key][slot.dayType]) acc[key][slot.dayType] = [];
-        (acc[key][slot.dayType] as any).push(slot);
+        const hourKey = getHourGroup(slot.timeSlot);
+        if (!acc[hourKey]) acc[hourKey] = {};
+        if (!acc[hourKey][slot.dayType]) acc[hourKey][slot.dayType] = [];
+        (acc[hourKey][slot.dayType] as any).push(slot);
         return acc;
     }, {} as Record<string, Record<string, MonthlySlot[]>>);
 
@@ -327,9 +334,14 @@ export default function MonthlySchedule() {
                                                                     >
                                                                         <div className="flex flex-col gap-2">
                                                                             <div className="flex items-center justify-between">
-                                                                                <span className={`text-xs font-bold ${hasDebtor ? 'text-orange-900' : ''}`}>
-                                                                                    {category?.name || 'Sin categoría'}
-                                                                                </span>
+                                                                                <div className="flex flex-col text-left">
+                                                                                    <span className={`text-[10px] font-mono font-bold opacity-60 ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                                        {slot.timeSlot}
+                                                                                    </span>
+                                                                                    <span className={`text-xs font-bold ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                                        {category?.name || 'Sin categoría'}
+                                                                                    </span>
+                                                                                </div>
                                                                                 {occupiedSeats >= slot.capacity && !hasDebtor && (
                                                                                     <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">LLENO</span>
                                                                                 )}

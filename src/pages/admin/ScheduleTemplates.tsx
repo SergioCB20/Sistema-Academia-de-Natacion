@@ -4,6 +4,7 @@ import { categoryService } from '../../services/categoryService';
 import { seasonService } from '../../services/seasonService';
 import { useSeason } from '../../contexts/SeasonContext';
 import type { ScheduleTemplate, Category, DayType, Season } from '../../types/db';
+import { getMonthsInRange } from '../../utils/monthUtils';
 
 export default function ScheduleTemplates() {
     const { currentSeason } = useSeason();
@@ -253,10 +254,27 @@ export default function ScheduleTemplates() {
                 selectedSeason.endMonth
             );
 
-            // Sync capacity from templates to ensure all slots have correct capacity
-            await monthlyScheduleService.syncCapacityFromTemplates(selectedSeasonId);
+            // NEW: Automatically cleanup duplicates and migrate students
+            const cleanupResult = await monthlyScheduleService.cleanupOrphanedAndDuplicateSlots(selectedSeasonId);
 
-            alert(`✅ Sincronización completada!\n\nSe generaron ${slotsCreated} horarios mensuales para "${selectedSeason.name}".\n\nCapacidades actualizadas desde las plantillas.`);
+            // NEW: Rescue students for the current and future months of the season
+            const months = getMonthsInRange(selectedSeason.startMonth, selectedSeason.endMonth);
+
+            let totalRescued = 0;
+            for (const month of months) {
+                totalRescued += await monthlyScheduleService.rescueLostEnrollments(selectedSeasonId, month);
+            }
+
+            let message = `✅ Sincronización completada!\n\nSe generaron ${slotsCreated} horarios mensuales para "${selectedSeason.name}".\n\nCapacidades actualizadas desde las plantillas.`;
+
+            if (cleanupResult.deleted > 0 || cleanupResult.migrated > 0 || totalRescued > 0) {
+                message += `\n\n🛠️ Limpieza y Recuperación:`;
+                if (cleanupResult.deleted > 0) message += `\n- ${cleanupResult.deleted} horarios duplicados eliminados.`;
+                if (cleanupResult.migrated > 0) message += `\n- ${cleanupResult.migrated} inscripciones movidas al formato estable.`;
+                if (totalRescued > 0) message += `\n- 🛡️ ${totalRescued} alumnos recuperados y vueltos a inscribir automáticamente.`;
+            }
+
+            alert(message);
         } catch (error) {
             console.error('Error syncing schedules:', error);
             alert('Error al sincronizar horarios');
@@ -277,14 +295,45 @@ export default function ScheduleTemplates() {
         });
     };
 
+    const getHourGroup = (timeSlot: string) => {
+        const match = (timeSlot || '').trim().match(/^(\d{1,2}):/);
+        if (!match) return timeSlot || '00:00';
+        const hour = match[1].padStart(2, '0');
+        return `${hour}:00`;
+    };
+
     const groupedTemplates = templates.reduce((acc, template) => {
-        const key = template.timeSlot;
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(template);
+        const key = getHourGroup(template.timeSlot);
+        if (!acc[key]) acc[key] = {};
+        if (!acc[key][template.dayType]) acc[key][template.dayType] = [];
+        acc[key][template.dayType].push(template);
         return acc;
-    }, {} as Record<string, ScheduleTemplate[]>);
+    }, {} as Record<string, Record<string, ScheduleTemplate[]>>);
 
     const timeSlots = Object.keys(groupedTemplates).sort();
+
+
+    const handleIdentifyOldDateStudents = async () => {
+        if (!selectedSeasonId) return;
+        try {
+            const { studentService } = await import('../../services/students');
+            const allStudents = await studentService.getBySeason(selectedSeasonId);
+
+            // Threshold: 2026-01-05
+            const threshold = "2026-01-05";
+            const affected = allStudents.filter(s => s.packageStartDate && s.packageStartDate < threshold);
+
+            if (affected.length === 0) {
+                alert("No se encontraron alumnos con fecha de inicio anterior al 05/01/2026.");
+            } else {
+                const names = affected.map(s => `- ${s.fullName} [Inicia: ${s.packageStartDate}]`).join('\n');
+                alert(`🔍 Alumnos con fecha anterior al 05/01 (${affected.length}):\n\n${names}\n\nCambia sus fechas a 05/01/2026 para que aparezcan como 'FUTURO'.`);
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Error al identificar alumnos");
+        }
+    };
 
     if (seasons.length === 0) {
         return (
@@ -376,59 +425,61 @@ export default function ScheduleTemplates() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {timeSlots.map((timeSlot) => {
-                                    const slotTemplates = groupedTemplates[timeSlot];
-                                    const byDayType = {
-                                        'lun-mier-vier': slotTemplates.filter(t => t.dayType === 'lun-mier-vier'),
-                                        'mar-juev': slotTemplates.filter(t => t.dayType === 'mar-juev'),
-                                        'sab-dom': slotTemplates.filter(t => t.dayType === 'sab-dom')
-                                    };
+                                {timeSlots.map((hourGroup) => {
+                                    const byDayType = groupedTemplates[hourGroup];
 
                                     return (
-                                        <tr key={timeSlot} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">
-                                                {timeSlot}
+                                        <tr key={hourGroup} className="hover:bg-gray-50 border-b border-gray-100 last:border-0">
+                                            <td className="px-6 py-4 whitespace-nowrap font-bold text-gray-500 font-mono bg-gray-50/30">
+                                                {hourGroup}
                                             </td>
-                                            {(['lun-mier-vier', 'mar-juev', 'sab-dom'] as DayType[]).map(dayType => (
-                                                <td key={dayType} className="px-6 py-4">
-                                                    <div className="flex flex-col gap-1">
-                                                        {byDayType[dayType].map(template => {
-                                                            const category = categories.find(c => c.id === template.categoryId);
-                                                            return (
-                                                                <div
-                                                                    key={template.id}
-                                                                    className="group relative"
-                                                                >
+                                            {(['lun-mier-vier', 'mar-juev', 'sab-dom'] as DayType[]).map(dayType => {
+                                                const templatesInCell = byDayType[dayType] || [];
+
+                                                return (
+                                                    <td key={dayType} className="px-6 py-4 border-l border-gray-100 min-w-[200px]">
+                                                        <div className="flex flex-col gap-2">
+                                                            {templatesInCell.map(template => {
+                                                                const category = categories.find(c => c.id === template.categoryId);
+                                                                return (
                                                                     <div
-                                                                        onClick={() => openEditModal(template)}
-                                                                        className="px-2 py-1 rounded text-xs text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                                                        style={{
-                                                                            backgroundColor: category?.color || '#gray',
-                                                                            color: template.isBreak ? 'black' : 'white'
-                                                                        }}
-                                                                        title="Click para editar"
+                                                                        key={template.id}
+                                                                        className="group relative"
                                                                     >
-                                                                        {template.isBreak ? (
-                                                                            <span>DESCANSO</span>
-                                                                        ) : (
-                                                                            <>
-                                                                                <div className="font-medium">{category?.name || 'Sin categoría'}</div>
-                                                                                <div className="text-xs opacity-90">Cap: {template.capacity}</div>
-                                                                            </>
-                                                                        )}
+                                                                        <div
+                                                                            onClick={() => openEditModal(template)}
+                                                                            className="px-3 py-2 rounded-xl text-xs text-center cursor-pointer hover:opacity-80 transition-all border border-black/5 shadow-sm"
+                                                                            style={{
+                                                                                backgroundColor: category?.color || '#cbd5e1',
+                                                                                color: template.isBreak ? 'black' : 'white'
+                                                                            }}
+                                                                            title="Click para editar"
+                                                                        >
+                                                                            <div className="flex justify-between items-center mb-1 opacity-80 font-bold">
+                                                                                <span>{template.timeSlot}</span>
+                                                                            </div>
+                                                                            {template.isBreak ? (
+                                                                                <span className="font-black tracking-widest uppercase text-[10px]">DESCANSO</span>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <div className="font-black text-[11px] uppercase truncate">{category?.name || 'Sin categoría'}</div>
+                                                                                    <div className="text-[10px] font-bold mt-1 bg-black/10 rounded-full inline-block px-2">Cap: {template.capacity}</div>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => handleDelete(template.id)}
+                                                                            className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"
+                                                                        >
+                                                                            ×
+                                                                        </button>
                                                                     </div>
-                                                                    <button
-                                                                        onClick={() => handleDelete(template.id)}
-                                                                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                    >
-                                                                        ×
-                                                                    </button>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </td>
-                                            ))}
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </td>
+                                                );
+                                            })}
                                         </tr>
                                     );
                                 })}
