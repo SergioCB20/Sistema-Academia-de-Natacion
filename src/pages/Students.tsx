@@ -94,7 +94,8 @@ export default function Students() {
         packageId: '',
         paymentMethodId: '',
         packageStartDate: '', // Optional future start date
-        packageEndDate: ''
+        packageEndDate: '',
+        observations: ''
     });
 
     const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
@@ -312,7 +313,8 @@ export default function Students() {
             packageId: '',
             paymentMethodId: '',
             packageStartDate: '',
-            packageEndDate: ''
+            packageEndDate: '',
+            observations: ''
         });
         setFixedSchedule([]);
         setPaymentData({
@@ -343,7 +345,8 @@ export default function Students() {
             packageId: student.currentPackageId || '',
             paymentMethodId: '',
             packageStartDate: student.packageStartDate || '',
-            packageEndDate: student.packageEndDate || ''
+            packageEndDate: student.packageEndDate || '',
+            observations: student.observations || ''
         });
         setFixedSchedule(student.fixedSchedule || []);
         setStep(1);
@@ -403,7 +406,8 @@ export default function Students() {
                     categoryId: formData.categoryId,
                     fixedSchedule: fixedSchedule,
                     packageStartDate: formData.packageStartDate || null,
-                    packageEndDate: formData.packageEndDate || null
+                    packageEndDate: formData.packageEndDate || null,
+                    observations: formData.observations
                 });
                 setIsModalOpen(false);
                 loadStudents();
@@ -631,7 +635,8 @@ export default function Students() {
                     'Horario': horario,
                     'Asistencia': asistenciaCount,
                     'Clases Restantes': student.remainingCredits || 0,
-                    'Monto Pagado': montoPagado
+                    'Monto Pagado': montoPagado,
+                    'Observaciones': student.observations || ''
                 };
             });
 
@@ -913,6 +918,11 @@ export default function Students() {
                                             {studentCategory.name}
                                         </span>
                                     )}
+                                    {student.observations && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                                            Con observaciones
+                                        </span>
+                                    )}
                                 </h3>
                                 <p className="text-sm text-slate-400 font-mono mb-4">
                                     DNI: {student.dni.startsWith('TEMP_') ? '(Sin DNI)' : student.dni}
@@ -1064,6 +1074,15 @@ export default function Students() {
                                                 value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })}
                                             />
                                         </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Observaciones <span className="text-slate-300 font-normal">(Opcional)</span></label>
+                                        <textarea
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/50 resize-none h-20"
+                                            value={formData.observations}
+                                            onChange={e => setFormData({ ...formData, observations: e.target.value })}
+                                            placeholder="Notas adicionales sobre el alumno..."
+                                        />
                                     </div>
                                 </div>
                             )}

@@ -172,6 +172,7 @@ export interface Student {
     birthDate?: string | null; // YYYY-MM-DD (optional)
     age?: number | null; // Manual age override
     studentCode?: string; // Auto-incremental code e.g. "00001"
+    observations?: string; // Additional notes
     asistencia?: AttendanceRecord[]; // Attendance history tracking
 }
 
