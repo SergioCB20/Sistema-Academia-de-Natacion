@@ -55,7 +55,7 @@ export default function MonthlySchedule() {
         try {
             const [slotsData, studentsData, categoriesData] = await Promise.all([
                 monthlyScheduleService.getBySeasonAndMonth(currentSeason.id, currentMonth),
-                studentService.getAllActive(),
+                studentService.getBySeason(currentSeason.id),
                 categoryService.getActive()
             ]);
 

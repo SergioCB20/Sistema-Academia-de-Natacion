@@ -214,7 +214,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('fullName', '>=', term),
             where('fullName', '<=', term + '\uf8ff'),
-            limit(10)
+            limit(100)
         );
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => doc.data() as Student);
@@ -228,7 +228,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(500)
+            limit(3000)
         );
 
         const snapshot = await getDocs(q);
@@ -246,7 +246,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(500)
+            limit(3000)
         );
 
         const snapshot = await getDocs(q);

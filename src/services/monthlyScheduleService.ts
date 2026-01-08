@@ -642,10 +642,11 @@ export const monthlyScheduleService = {
             };
         }
 
-        // Fetch active students to filter orphaned enrollments
+        // Fetch active students belonging to THIS season to filter orphaned enrollments
         const studentsQuery = query(
             collection(db, STUDENTS_COLLECTION),
-            where('active', '==', true)
+            where('active', '==', true),
+            where('seasonId', '==', seasonId)
         );
         const studentsSnapshot = await getDocs(studentsQuery);
         const activeStudentIds = new Set(studentsSnapshot.docs.map(doc => doc.id));
