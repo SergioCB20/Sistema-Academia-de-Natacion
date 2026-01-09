@@ -145,15 +145,9 @@ export const monthlyScheduleService = {
             const reqDateStr = student.packageStartDate || new Date().toISOString().split('T')[0];
             const requestedStartDate = new Date(`${reqDateStr}T00:00:00`);
 
-            // To be 100% accurate inside the transaction, we need to know who is active 
-            // We fetch this list just before or as part of the check
-            const studentsSnapshot = await getDocs(query(collection(db, STUDENTS_COLLECTION), where('active', '==', true)));
-            const activeIds = new Set(studentsSnapshot.docs.map(d => d.id));
-
+            // OPTIMIZATION: Removed getDocs of all active students (~200 reads saved)
+            // Simply count enrollments that are still active at the requested date
             const activeEnrollments = (slot.enrolledStudents || []).filter(e => {
-                // ONLY count if student is marked as active in DB
-                if (!activeIds.has(e.studentId)) return false;
-
                 const endDate = e.endsAt instanceof Timestamp ? e.endsAt.toDate() : e.endsAt instanceof Date ? e.endsAt : new Date(e.endsAt as any);
                 // Check if student is still active on our requested start date
                 return endDate >= requestedStartDate;

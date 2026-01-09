@@ -313,28 +313,6 @@ export default function ScheduleTemplates() {
     const timeSlots = Object.keys(groupedTemplates).sort();
 
 
-    const handleIdentifyOldDateStudents = async () => {
-        if (!selectedSeasonId) return;
-        try {
-            const { studentService } = await import('../../services/students');
-            const allStudents = await studentService.getBySeason(selectedSeasonId);
-
-            // Threshold: 2026-01-05
-            const threshold = "2026-01-05";
-            const affected = allStudents.filter(s => s.packageStartDate && s.packageStartDate < threshold);
-
-            if (affected.length === 0) {
-                alert("No se encontraron alumnos con fecha de inicio anterior al 05/01/2026.");
-            } else {
-                const names = affected.map(s => `- ${s.fullName} [Inicia: ${s.packageStartDate}]`).join('\n');
-                alert(`🔍 Alumnos con fecha anterior al 05/01 (${affected.length}):\n\n${names}\n\nCambia sus fechas a 05/01/2026 para que aparezcan como 'FUTURO'.`);
-            }
-        } catch (error) {
-            console.error(error);
-            alert("Error al identificar alumnos");
-        }
-    };
-
     if (seasons.length === 0) {
         return (
             <div className="p-6">

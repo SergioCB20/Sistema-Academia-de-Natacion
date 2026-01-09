@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { studentService } from '../services/students';
 import type { Student } from '../types/db';
 
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutos
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos - capacidad en tiempo real, estudiantes optimizados
 let cachedStudents: Student[] = [];
 let lastFetch = 0;
 let isFetching = false;
@@ -54,11 +54,20 @@ export function useStudentsCache() {
         fetchStudents();
     }, [fetchStudents]);
 
+    const updateStudents = useCallback((newData: Student[] | ((prev: Student[]) => Student[])) => {
+        setStudents(prev => {
+            const resolved = typeof newData === 'function' ? newData(prev) : newData;
+            cachedStudents = resolved;
+            return resolved;
+        });
+    }, []);
+
     return {
         students,
         loading,
         error,
         refetch: () => fetchStudents(true),
-        invalidateCache
+        invalidateCache,
+        setStudents: updateStudents
     };
 }

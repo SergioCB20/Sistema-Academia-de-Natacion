@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Search, Trash2, X, CheckCircle } from 'lucide-react';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
+import { useStudentsCache } from '../hooks/useStudentsCache';
 import { useSeason } from '../contexts/SeasonContext';
 import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth, parseMonthId } from '../utils/monthUtils';
 import { calculateRealRemaining } from '../utils/studentUtils';
@@ -26,7 +27,8 @@ export default function MonthlySchedule() {
 
     const [currentMonth, setCurrentMonth] = useState(getInitialMonth());
     const [slots, setSlots] = useState<MonthlySlot[]>([]);
-    const [students, setStudents] = useState<Student[]>([]);
+    // Use cache hook for students
+    const { students: cachedStudents, setStudents } = useStudentsCache();
     const [categories, setCategories] = useState<Category[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -48,19 +50,24 @@ export default function MonthlySchedule() {
         loadData();
     }, [currentMonth, currentSeason]);
 
+    // Filter cached students by season
+    const students = useMemo(() => {
+        if (!currentSeason || !cachedStudents) return [];
+        return cachedStudents.filter(s => s.seasonId === currentSeason.id);
+    }, [cachedStudents, currentSeason]);
+
     const loadData = async () => {
         if (!currentSeason) return;
 
         setLoading(true);
         try {
-            const [slotsData, studentsData, categoriesData] = await Promise.all([
+            // Only fetch slots and categories - students come from cache
+            const [slotsData, categoriesData] = await Promise.all([
                 monthlyScheduleService.getBySeasonAndMonth(currentSeason.id, currentMonth),
-                studentService.getBySeason(currentSeason.id),
                 categoryService.getActive()
             ]);
 
             setSlots(slotsData);
-            setStudents(studentsData);
             setCategories(categoriesData);
         } catch (error) {
             console.error('Error loading data:', error);
@@ -101,6 +108,7 @@ export default function MonthlySchedule() {
         setBookingLoading(true);
         try {
             await monthlyScheduleService.unenrollStudent(selectedSlot.id, studentId);
+            // Reload only slots - students are in cache
             await loadData();
 
             // Update selected slot
@@ -127,6 +135,7 @@ export default function MonthlySchedule() {
         setBookingLoading(true);
         try {
             await monthlyScheduleService.enrollStudent(selectedSlot.id, student.id);
+            // Reload only slots - students are in cache
             await loadData();
             const updated = await monthlyScheduleService.getById(selectedSlot.id);
             if (updated) setSelectedSlot(updated);
@@ -771,3 +780,4 @@ export default function MonthlySchedule() {
         </div>
     );
 }
+
