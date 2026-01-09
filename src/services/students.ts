@@ -228,7 +228,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(3000)
+            limit(5000)
         );
 
         const snapshot = await getDocs(q);
@@ -246,7 +246,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(3000)
+            limit(5000)
         );
 
         const snapshot = await getDocs(q);
