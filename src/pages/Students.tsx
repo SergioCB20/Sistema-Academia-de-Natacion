@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { studentService } from '../services/students';
+import { useStudentsCache } from '../hooks/useStudentsCache';
 import { categoryService } from '../services/categoryService';
 import { scheduleTemplateService } from '../services/scheduleTemplateService';
 import { paymentMethodService } from '../services/paymentMethodService';
@@ -32,7 +33,8 @@ import type { Student, Debt, Category, Package, Season, DayType, ScheduleTemplat
 
 export default function Students() {
     const navigate = useNavigate();
-    const [students, setStudents] = useState<Student[]>([]);
+    // Use cache hook instead of local state
+    const { students: cachedStudents, loading: cacheLoading, refetch: refetchStudents, invalidateCache } = useStudentsCache();
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const isSubmittingRef = useRef(false);
@@ -144,12 +146,16 @@ export default function Students() {
         loadPaymentMethods();
     }, []);
 
-    // Load students when Active Season is ready
+    // Filter cached students by active season
+    const students = useMemo(() => {
+        if (!activeSeason || !cachedStudents) return [];
+        return cachedStudents.filter(s => s.seasonId === activeSeason.id);
+    }, [cachedStudents, activeSeason]);
+
+    // Update loading state from cache
     useEffect(() => {
-        if (activeSeason) {
-            loadStudents();
-        }
-    }, [activeSeason]);
+        setLoading(cacheLoading);
+    }, [cacheLoading]);
 
     // Load templates when category changes and we're on step 2
     useEffect(() => {
@@ -189,18 +195,7 @@ export default function Students() {
         }
     }, [paymentData.startDate, paymentData.credits, fixedSchedule]);
 
-    const loadStudents = async () => {
-        if (!activeSeason) return; // Wait for season to load
-        setLoading(true);
-        try {
-            const data = await studentService.getBySeason(activeSeason.id);
-            setStudents(data);
-        } catch (error) {
-            console.error("Error loading students:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
+    // Removed loadStudents - now using cache hook
 
     const loadCategories = async () => {
         try {
@@ -272,9 +267,12 @@ export default function Students() {
             // Load ALL templates to build the global grid
             setTemplates(allTemplates);
 
-            // Fetch capacity info for all templates
+            // OPTIMIZATION: Filter templates by category, then only fetch capacity for those
+            // This reduces reads from ~30 to ~3-5 per wizard open
+            const filteredByCategory = allTemplates.filter(t => t.categoryId === categoryId || !t.categoryId);
+
             setLoadingCapacity(true);
-            const capacityPromises = allTemplates.map(async (template) => {
+            const capacityPromises = filteredByCategory.map(async (template: ScheduleTemplate) => {
                 const info = await monthlyScheduleService.getScheduleCapacityInfo(
                     activeSeason.id,
                     template.dayType,
@@ -285,7 +283,7 @@ export default function Students() {
 
             const results = await Promise.all(capacityPromises);
             const newCapacityInfo: any = {};
-            results.forEach(res => {
+            results.forEach((res: any) => {
                 newCapacityInfo[res.key] = res.info;
             });
             setCapacityInfo(newCapacityInfo);
@@ -360,7 +358,8 @@ export default function Students() {
 
         try {
             await studentService.delete(studentId, deleteFinancials);
-            loadStudents();
+            invalidateCache();
+            await refetchStudents();
             alert("Alumno eliminado correctamente.");
         } catch (error) {
             console.error("Error deleting student:", error);
@@ -410,7 +409,8 @@ export default function Students() {
                     observations: formData.observations
                 });
                 setIsModalOpen(false);
-                loadStudents();
+                invalidateCache();
+                await refetchStudents();
             } else {
                 const newStudentDni = formData.dni || `TEMP_${Date.now()}`;
 
@@ -445,7 +445,8 @@ export default function Students() {
                 // Go to step 4 (confirmation) instead of closing
                 setRegisteredStudentDni(newStudentDni);
                 setStep(4);
-                loadStudents();
+                invalidateCache();
+                await refetchStudents();
             }
         } catch (error: any) {
             console.error("Error saving student:", error);
@@ -508,14 +509,13 @@ export default function Students() {
             handleCancelDebtPayment();
 
             if (updatedDebts.length === 0) {
-                loadStudents();
+                invalidateCache();
+                await refetchStudents();
                 setIsDebtModalOpen(false);
             } else {
-                // Refresh main list to update "hasDebt" status if needed (though existing logic handles only full clear usually)
-                // If partial payment, they still have debt probably, unless specific logic exists. 
-                // But we should refresh students to update balances if shown? 
-                // The students list shows "hasDebt" flag. If partial payment clears it, we need to refresh.
-                loadStudents();
+                // Refresh main list to update "hasDebt" status
+                invalidateCache();
+                await refetchStudents();
             }
         } catch (e: any) {
             alert(e.message);
@@ -554,7 +554,8 @@ export default function Students() {
 
             // alert("Recarga exitosa");
             setIsRechargeModalOpen(false);
-            loadStudents();
+            invalidateCache();
+            await refetchStudents();
         } catch (error: any) {
             console.error(error);
             alert(error.message || "Error en recarga");

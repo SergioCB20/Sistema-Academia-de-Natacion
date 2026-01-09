@@ -54,9 +54,9 @@ export const studentService = {
         );
         const { matchingSlots } = slotsInfo;
 
-        // Fetch ALL active student IDs once to use in capacity checks inside transaction
-        const studentsSnapshot = await getDocs(query(collection(db, STUDENTS_COLLECTION), where('active', '==', true)));
-        const activeIds = new Set(studentsSnapshot.docs.map(d => d.id));
+        // OPTIMIZATION: Removed getDocs of all active students (~200 reads saved)
+        // The capacity check will count all enrollments, which is safe since
+        // inactive students shouldn't be enrolled in future dates anyway
 
         // Use id field for document reference (handles empty DNI case)
         const studentRef = doc(db, STUDENTS_COLLECTION, studentData.id);
@@ -170,7 +170,7 @@ export const studentService = {
 
                 // Final Capacity Check inside transaction
                 const activeEnrollments = (slot.enrolledStudents || []).filter((e: any) => {
-                    if (!activeIds.has(e.studentId)) return false;
+                    // Removed activeIds check - count all enrollments that haven't ended
                     const endDate = e.endsAt?.toDate ? e.endsAt.toDate() : new Date(e.endsAt);
                     return endDate >= requestedStartDate;
                 });
