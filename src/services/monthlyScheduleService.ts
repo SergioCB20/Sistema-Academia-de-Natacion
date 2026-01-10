@@ -217,11 +217,11 @@ export const monthlyScheduleService = {
             transaction.update(slotRef, {
                 enrolledStudents: updatedEnrollments.map(e => ({
                     ...e,
-                    enrolledAt: Timestamp.fromDate(new Date(e.enrolledAt)),
-                    endsAt: Timestamp.fromDate(new Date(e.endsAt)),
+                    enrolledAt: Timestamp.fromDate(toJsDate(e.enrolledAt)),
+                    endsAt: Timestamp.fromDate(toJsDate(e.endsAt)),
                     attendanceRecord: e.attendanceRecord?.map(att => ({
                         ...att,
-                        markedAt: att.markedAt ? Timestamp.fromDate(new Date(att.markedAt)) : null
+                        markedAt: att.markedAt ? Timestamp.fromDate(toJsDate(att.markedAt)) : null
                     }))
                 })),
                 updatedAt: Timestamp.now()
@@ -388,11 +388,11 @@ export const monthlyScheduleService = {
             transaction.update(slotRef, {
                 enrolledStudents: updatedEnrollments.map(e => ({
                     ...e,
-                    enrolledAt: Timestamp.fromDate(new Date(e.enrolledAt)),
-                    endsAt: Timestamp.fromDate(new Date(e.endsAt)),
+                    enrolledAt: Timestamp.fromDate(toJsDate(e.enrolledAt)),
+                    endsAt: Timestamp.fromDate(toJsDate(e.endsAt)),
                     attendanceRecord: e.attendanceRecord?.map(att => ({
                         ...att,
-                        markedAt: att.markedAt ? Timestamp.fromDate(new Date(att.markedAt)) : null
+                        markedAt: att.markedAt ? Timestamp.fromDate(toJsDate(att.markedAt)) : null
                     }))
                 })),
                 updatedAt: Timestamp.now()

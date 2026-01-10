@@ -19,6 +19,7 @@ import ScheduleTemplates from './pages/admin/ScheduleTemplates';
 import PaymentMethods from './pages/admin/PaymentMethods';
 import MassImport from './pages/admin/MassImport';
 import CardSettings from './pages/admin/CardSettings';
+import Cleanup from './pages/Cleanup';
 
 function App() {
   return (
@@ -98,6 +99,11 @@ function App() {
               <Route path="admin/carnet-config" element={
                 <ProtectedRoute allowedRoles={['SUPERADMIN']}>
                   <CardSettings />
+                </ProtectedRoute>
+              } />
+              <Route path="admin/cleanup" element={
+                <ProtectedRoute allowedRoles={['SUPERADMIN']}>
+                  <Cleanup />
                 </ProtectedRoute>
               } />
             </Route>
