@@ -169,13 +169,25 @@ export const studentService = {
                 const { ref: slotRef, data: slot } = slotInfo;
 
                 // Final Capacity Check inside transaction
-                const activeEnrollments = (slot.enrolledStudents || []).filter((e: any) => {
-                    // Removed activeIds check - count all enrollments that haven't ended
-                    const endDate = e.endsAt?.toDate ? e.endsAt.toDate() : new Date(e.endsAt);
-                    return endDate >= requestedStartDate;
+                // Count UNIQUE students that overlap with THIS specific month
+                // Parse slot month to get month boundaries
+                const [year, month] = slot.month.split('-').map(Number);
+                const monthStart = new Date(year, month - 1, 1).getTime();
+                const monthEnd = new Date(year, month, 0, 23, 59, 59).getTime();
+
+                const uniqueActiveStudents = new Set<string>();
+
+                (slot.enrolledStudents || []).forEach((e: any) => {
+                    const startDate = e.enrolledAt?.toDate ? e.enrolledAt.toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
+                    const endDate = e.endsAt?.toDate ? e.endsAt.toDate().getTime() : new Date(e.endsAt).getTime();
+
+                    // Only count if enrollment overlaps with this specific month
+                    if (startDate <= monthEnd && endDate >= monthStart) {
+                        uniqueActiveStudents.add(e.studentId);
+                    }
                 });
 
-                if (activeEnrollments.length >= slot.capacity) {
+                if (uniqueActiveStudents.size >= slot.capacity) {
                     throw new Error(`${slot.month}: El horario se llenó en el último segundo.`);
                 }
 
@@ -341,11 +353,18 @@ export const studentService = {
         const dateChanged = updates.packageStartDate !== undefined || updates.packageEndDate !== undefined;
         const scheduleChanged = updates.fixedSchedule !== undefined;
 
+        console.log(`🔄 Update student ${id}:`);
+        console.log(`   dateChanged: ${dateChanged}`);
+        console.log(`   scheduleChanged: ${scheduleChanged}`);
+
         if (dateChanged || scheduleChanged) {
             const finalSchedule = updates.fixedSchedule || currentData.fixedSchedule;
             const finalStart = updates.packageStartDate !== undefined ? updates.packageStartDate : currentData.packageStartDate;
             const finalEnd = updates.packageEndDate !== undefined ? updates.packageEndDate : currentData.packageEndDate;
             const finalCategory = updates.categoryId || currentData.categoryId;
+
+            console.log(`   ➡️ Sincronizando horarios...`);
+            console.log(`   Schedule:`, finalSchedule);
 
             // Only sync if there is a schedule
             if (finalSchedule && finalSchedule.length > 0) {
@@ -357,12 +376,17 @@ export const studentService = {
                         finalStart,
                         finalCategory
                     );
+                    console.log(`   ✅ Sincronización completada`);
                 } catch (error) {
-                    console.error("Error syncing schedule during update:", error);
+                    console.error(`   ❌ Error syncing schedule during update:`, error);
                     // We don't throw here to avoid blocking the basic update, 
                     // but the changes are already saved in the student doc.
                 }
+            } else {
+                console.log(`   ⚠️ No schedule to sync`);
             }
+        } else {
+            console.log(`   ⏭️ Skipping sync - no schedule/date changes`);
         }
 
         // If student is being deactivated, decrement counter
@@ -661,9 +685,56 @@ export const studentService = {
     },
 
     /**
+     * Helper: Unenroll a student from all monthly slots in the active season.
+     * This is used when updating a student's schedule to remove them from old slots.
+     */
+    async _unenrollStudentFromAllSlots(
+        studentId: string,
+        seasonId: string
+    ): Promise<number> {
+        const { monthlyScheduleService } = await import('./monthlyScheduleService');
+        const { db } = await import('../lib/firebase');
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+
+        // Find all monthly slots that contain this student
+        const q = query(
+            collection(db, 'monthly_slots'),
+            where('seasonId', '==', seasonId)
+        );
+
+        const snapshot = await getDocs(q);
+        let unenrolled = 0;
+
+        console.log(`🔍 Buscando inscripciones del alumno ${studentId} en temporada ${seasonId}...`);
+        console.log(`📊 Total de slots en la temporada: ${snapshot.size}`);
+
+        for (const docSnap of snapshot.docs) {
+            const slot = docSnap.data();
+            const enrollment = slot.enrolledStudents?.find((e: any) => e.studentId === studentId);
+
+            if (enrollment) {
+                console.log(`📍 Encontrado en slot: ${slot.timeSlot} (${slot.month}) - ID: ${docSnap.id}`);
+                try {
+                    await monthlyScheduleService.unenrollStudent(docSnap.id, studentId);
+                    unenrolled++;
+                    console.log(`✅ Desinscrito exitosamente de ${slot.timeSlot}`);
+                } catch (error: any) {
+                    console.error(`❌ Error desinscribiendo de ${slot.timeSlot}:`, error.message);
+                }
+            }
+        }
+
+        console.log(`🗑️ Alumno ${studentId} desinscrito de ${unenrolled} horarios mensuales`);
+        return unenrolled;
+    },
+
+    /**
      * Helper: Syncs a student's fixed schedule to existing monthly slots in the DB.
      * This enrolls the student in all monthly slots that match their schedule for the current season.
      * Includes capacity validation and provides detailed error messages.
+     * 
+     * IMPORTANT: This function first removes the student from ALL existing slots in the season,
+     * then enrolls them in the new slots. This ensures clean schedule transitions.
      */
     async syncFixedScheduleToMonthlySlots(
         studentId: string,
@@ -677,40 +748,34 @@ export const studentService = {
         const { seasonService } = await import('./seasonService');
         const { getMonthName } = await import('../utils/monthUtils');
 
-        // ... Reuse validation logic via helper or explicitly ...
-        // For now, allow redundancy or refactor to use common logic.
-        // We will just do the enrollment part here, relying on validation done before?
-        // No, in case of 'update', we need validation too.
-        // Let's keep the logic here but cleaner.
-
-        // Actually, for DRY, let's call the validator inside here too, or just expect it to pass?
-        // If we call simple validator, we duplicate query costs?
-        // Let's just implement the enrollment directly here, but using the same 'matchingSlots' logic.
-        // To minimize code duplication, we can extract the "getMatchingSlots" logic?
-
-        // For speed, I'll essentially execute the same logic for now to ensure consistency, 
-        // but `create` already called `validateScheduleAvailability`.
-
         // Get active season
         const activeSeason = await seasonService.getActiveSeason();
         if (!activeSeason) throw new Error('No hay temporada activa.');
 
+        // STEP 1: Remove student from ALL existing monthly slots in this season
+        // This ensures the student is only enrolled in their current schedule
+        await this._unenrollStudentFromAllSlots(studentId, activeSeason.id);
+
+        // STEP 2: Get matching slots for the new schedule
         const slotsInfo = await this._getMatchingSlots(activeSeason, fixedSchedule, packageStartDate, packageEndDate, categoryId);
         const { matchingSlots } = slotsInfo;
 
-        // Validation happened in _getMatchingSlots or similar? 
-        // No, let's just copy the critical "enrollment" part here and delegate the finding to _getMatchingSlots.
-
+        // STEP 3: Enroll student in new slots
         let enrolled = 0;
         const errors: string[] = [];
 
+        console.log(`📝 Intentando inscribir en ${matchingSlots.length} slots nuevos...`);
+
         for (const slot of matchingSlots) {
             try {
+                console.log(`➕ Inscribiendo en: ${slot.timeSlot} (${slot.month})`);
                 await monthlyScheduleService.enrollStudent(slot.id, studentId);
                 enrolled++;
+                console.log(`✅ Inscrito exitosamente`);
             } catch (error: any) {
-                // Ignore if already enrolled
+                // Ignore if already enrolled (shouldn't happen after unenroll, but just in case)
                 if (!error.message?.includes('ya está inscrito')) {
+                    console.error(`❌ Error inscribiendo:`, error.message);
                     errors.push(`${getMonthName(slot.month)}: ${error.message}`);
                 }
             }
@@ -828,8 +893,7 @@ export const studentService = {
 
         matchingSlots.sort((a, b) => a.month.localeCompare(b.month));
 
-        // Capacity Check 
-        const requestedStartDate = packageStartDate ? new Date(`${packageStartDate}T00:00:00`) : new Date();
+        // Capacity Check - verify slots have space for this student
 
         // Fetch ALL active student IDs to ensure we only count real, active students
         const studentsQ = query(
@@ -841,15 +905,38 @@ export const studentService = {
 
         const fullSlots = matchingSlots.filter(s => {
             const enrolled = s.enrolledStudents || [];
-            let activeCount = 0;
+
+            // Parse slot month to get boundaries
+            const [year, month] = s.month.split('-').map(Number);
+            const monthStart = new Date(year, month - 1, 1).getTime();
+            const monthEnd = new Date(year, month, 0, 23, 59, 59).getTime();
+
+            // Use Set to count UNIQUE active students (avoid counting duplicates)
+            const uniqueActiveStudents = new Set<string>();
+
             enrolled.forEach((enrollment: any) => {
                 // ONLY count if student is marked as active in DB
                 if (!activeStudentIds.has(enrollment.studentId)) return;
 
-                const endDate = enrollment.endsAt?.toDate ? enrollment.endsAt.toDate() : new Date(enrollment.endsAt);
-                if (endDate >= requestedStartDate) activeCount++;
+                const startDate = enrollment.enrolledAt?.toDate ? enrollment.enrolledAt.toDate().getTime() : new Date(enrollment.enrolledAt || 0).getTime();
+                const endDate = enrollment.endsAt?.toDate ? enrollment.endsAt.toDate().getTime() : new Date(enrollment.endsAt).getTime();
+
+                // Only count if enrollment overlaps with this specific month
+                if (startDate <= monthEnd && endDate >= monthStart) {
+                    uniqueActiveStudents.add(enrollment.studentId);
+                }
             });
-            return activeCount >= s.capacity;
+
+            const isFull = uniqueActiveStudents.size >= s.capacity;
+
+            // Debug logging
+            console.log(`📊 Slot ${s.timeSlot} (${s.month}):`);
+            console.log(`   Total enrollments: ${enrolled.length}`);
+            console.log(`   Unique active students: ${uniqueActiveStudents.size}`);
+            console.log(`   Capacity: ${s.capacity}`);
+            console.log(`   Full: ${isFull}`);
+
+            return isFull;
         });
 
         if (fullSlots.length > 0) {
@@ -863,6 +950,87 @@ export const studentService = {
         }
 
         return { matchingSlots };
+    },
+
+    /**
+     * CLEANUP UTILITY: Remove duplicate enrollments for students
+     * This finds students who are enrolled in multiple time slots when they should only be in their fixedSchedule slots
+     */
+    async cleanupDuplicateEnrollments(seasonId?: string): Promise<{ studentsProcessed: number, duplicatesRemoved: number }> {
+        const { seasonService } = await import('./seasonService');
+        const { monthlyScheduleService } = await import('./monthlyScheduleService');
+
+        // Get active season if not provided
+        const activeSeason = seasonId ? { id: seasonId } : await seasonService.getActiveSeason();
+        if (!activeSeason) throw new Error('No hay temporada activa.');
+
+        console.log(`🧹 Iniciando limpieza de duplicados en temporada ${activeSeason.id}...`);
+
+        // Get all active students
+        const students = await this.getAllActive();
+        let studentsProcessed = 0;
+        let duplicatesRemoved = 0;
+
+        for (const student of students) {
+            if (!student.fixedSchedule || student.fixedSchedule.length === 0) continue;
+
+            console.log(`\n👤 Procesando: ${student.fullName}`);
+
+            // Get expected schedule
+            const expectedTimeSlots = Array.from(new Set(student.fixedSchedule.map(s => s.timeId)));
+
+            console.log(`   Horario esperado: ${expectedTimeSlots.join(', ')}`);
+
+            // Find all slots where student is enrolled
+            const q = query(
+                collection(db, 'monthly_slots'),
+                where('seasonId', '==', activeSeason.id)
+            );
+            const snapshot = await getDocs(q);
+
+            const enrolledSlots: Array<{ id: string, timeSlot: string, month: string }> = [];
+
+            for (const docSnap of snapshot.docs) {
+                const slot = docSnap.data();
+                const isEnrolled = slot.enrolledStudents?.some((e: any) => e.studentId === student.id);
+                if (isEnrolled) {
+                    enrolledSlots.push({
+                        id: docSnap.id,
+                        timeSlot: slot.timeSlot,
+                        month: slot.month
+                    });
+                }
+            }
+
+            if (enrolledSlots.length === 0) continue;
+
+            console.log(`   Inscrito en ${enrolledSlots.length} slots:`, enrolledSlots.map(s => `${s.timeSlot} (${s.month})`).join(', '));
+
+            // Determine which slots are wrong (not matching fixedSchedule time)
+            const wrongSlots = enrolledSlots.filter(slot => !expectedTimeSlots.includes(slot.timeSlot));
+
+            if (wrongSlots.length > 0) {
+                console.log(`   ⚠️ ${wrongSlots.length} inscripciones incorrectas detectadas`);
+
+                for (const wrongSlot of wrongSlots) {
+                    try {
+                        await monthlyScheduleService.unenrollStudent(wrongSlot.id, student.id);
+                        duplicatesRemoved++;
+                        console.log(`   ✅ Removido de: ${wrongSlot.timeSlot} (${wrongSlot.month})`);
+                    } catch (error: any) {
+                        console.error(`   ❌ Error removiendo de ${wrongSlot.timeSlot}:`, error.message);
+                    }
+                }
+            }
+
+            studentsProcessed++;
+        }
+
+        console.log(`\n✅ Limpieza completada:`);
+        console.log(`   Estudiantes procesados: ${studentsProcessed}`);
+        console.log(`   Duplicados removidos: ${duplicatesRemoved}`);
+
+        return { studentsProcessed, duplicatesRemoved };
     },
 
     async getActiveStudentsCount(): Promise<number> {

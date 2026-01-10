@@ -149,7 +149,8 @@ export default function MonthlySchedule() {
 
 
 
-    // Calculate "Occupied Seats" based on peak concurrency
+    // Calculate "Occupied Seats" - Count UNIQUE active students for this month
+    // Don't rely on cache since it can be stale
     const calculateOccupiedSeats = (enrollments: MonthlyEnrollment[], slot: MonthlySlot) => {
         if (!enrollments || enrollments.length === 0) return 0;
 
@@ -159,49 +160,21 @@ export default function MonthlySchedule() {
         // End of month
         const slotEnd = new Date(slotMonthDate.getFullYear(), slotMonthDate.getMonth() + 1, 0, 23, 59, 59).getTime();
 
-        // Filter out orphaned enrollments (deleted students) 
-        // AND enrollments that don't overlap with THIS specific month
-        const validEnrollments = enrollments.filter(e => {
-            const hasStudent = students.some(s => s.id === e.studentId);
-            if (!hasStudent) return false;
+        // Count UNIQUE students that have overlap with this month
+        // Don't filter by cache - just count unique IDs with valid date overlap
+        const uniqueActiveStudents = new Set<string>();
 
+        enrollments.forEach(e => {
             const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
             const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
 
-            // Overlap check
-            return start <= slotEnd && end >= slotStart;
+            // Only count if enrollment overlaps with this month
+            if (start <= slotEnd && end >= slotStart) {
+                uniqueActiveStudents.add(e.studentId);
+            }
         });
 
-        if (validEnrollments.length === 0) return 0;
-
-        // Create events: +1 at start, -1 at end
-        const events: { time: number; type: number }[] = [];
-
-        validEnrollments.forEach(e => {
-            const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
-            let end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
-
-            if (end < start) end = start;
-
-            // Only count overlap within this month for concurrency calculation
-            const effectiveStart = Math.max(start, slotStart);
-            const effectiveEnd = Math.min(end, slotEnd);
-
-            events.push({ time: effectiveStart, type: 1 });
-            events.push({ time: effectiveEnd + 1, type: -1 });
-        });
-
-        events.sort((a, b) => a.time - b.time || a.type - b.type);
-
-        let maxOccupancy = 0;
-        let currentOccupancy = 0;
-
-        events.forEach(event => {
-            currentOccupancy += event.type;
-            if (currentOccupancy > maxOccupancy) maxOccupancy = currentOccupancy;
-        });
-
-        return maxOccupancy;
+        return uniqueActiveStudents.size;
     };
 
     const getStatusColor = (capacity: number, enrolled: number) => {
@@ -417,24 +390,33 @@ export default function MonthlySchedule() {
                             </button>
                         </div>
 
-                        {/* Filter out orphaned enrollments (deleted students) */}
+                        {/* Count enrollments independently of cache */}
                         {(() => {
                             const slotMonthDate = parseMonthId(selectedSlot.month);
                             const slotStart = slotMonthDate.getTime();
                             const slotEnd = new Date(slotMonthDate.getFullYear(), slotMonthDate.getMonth() + 1, 0, 23, 59, 59).getTime();
 
+                            // For display: show ALL enrollments that overlap with month (don't filter by cache)
                             const validEnrollments = (selectedSlot.enrolledStudents || []).filter(
                                 (e: MonthlyEnrollment) => {
-                                    const hasStudent = students.some(s => s.id === e.studentId);
-                                    if (!hasStudent) return false;
-
                                     const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
                                     const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
 
                                     return start <= slotEnd && end >= slotStart;
                                 }
                             );
-                            const validCount = validEnrollments.length;
+
+                            // For count: count ALL unique students with valid dates (don't filter by cache)
+                            const uniqueStudents = new Set<string>();
+                            (selectedSlot.enrolledStudents || []).forEach((e: MonthlyEnrollment) => {
+                                const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
+                                const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
+                                if (start <= slotEnd && end >= slotStart) {
+                                    uniqueStudents.add(e.studentId);
+                                }
+                            });
+
+                            const validCount = uniqueStudents.size;
                             const availableSlots = selectedSlot.capacity - validCount;
 
                             return (
@@ -508,15 +490,25 @@ export default function MonthlySchedule() {
 
                                                     // Use Student profile dates if available, otherwise fall back to enrollment snapshot
                                                     // This ensures that if the student date is edited, the schedule reflects it immediately
-                                                    let endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
-                                                    let startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
+                                                    let endDate: Date;
+                                                    let startDate: Date;
 
-                                                    if (student?.packageStartDate) {
-                                                        // Use noon to avoid timezone shift issues with YYYY-MM-DD strings
-                                                        startDate = new Date(`${student.packageStartDate}T12:00:00`);
-                                                    }
-                                                    if (student?.packageEndDate) {
-                                                        endDate = new Date(`${student.packageEndDate}T23:59:59`);
+                                                    try {
+                                                        endDate = (enrollment.endsAt as any)?.toDate ? (enrollment.endsAt as any).toDate() : new Date(enrollment.endsAt);
+                                                        startDate = (enrollment.enrolledAt as any)?.toDate ? (enrollment.enrolledAt as any).toDate() : new Date(enrollment.enrolledAt || 0);
+
+                                                        if (student?.packageStartDate) {
+                                                            // Use noon to avoid timezone shift issues with YYYY-MM-DD strings
+                                                            startDate = new Date(`${student.packageStartDate}T12:00:00`);
+                                                        }
+                                                        if (student?.packageEndDate) {
+                                                            endDate = new Date(`${student.packageEndDate}T23:59:59`);
+                                                        }
+                                                    } catch (e) {
+                                                        // Fallback to now if dates are invalid
+                                                        console.error('Error parsing dates for enrollment:', e);
+                                                        endDate = new Date();
+                                                        startDate = new Date();
                                                     }
 
                                                     const now = new Date();
