@@ -58,6 +58,10 @@ export default function Students() {
     const [loadingCapacity, setLoadingCapacity] = useState(false);
     const [minPackageStartDate, setMinPackageStartDate] = useState<string | null>(null);
 
+    // Search results state
+    const [searchResults, setSearchResults] = useState<Student[] | null>(null);
+    const [isSearching, setIsSearching] = useState(false);
+
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -163,6 +167,28 @@ export default function Students() {
             loadTemplates(formData.categoryId); // Category-specific templates
         }
     }, [step, formData.categoryId, activeSeason]);
+
+    // Server-side search logic
+    useEffect(() => {
+        if (searchTerm.trim().length === 0) {
+            setSearchResults(null);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            setIsSearching(true);
+            try {
+                const results = await studentService.search(searchTerm);
+                setSearchResults(results);
+            } catch (error) {
+                console.error("Error searching students:", error);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 600);
+
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
 
     // Load packages when season and category are available
     useEffect(() => {
@@ -785,10 +811,7 @@ export default function Students() {
         setStep(step - 1);
     };
 
-    const filteredStudents = students.filter(s =>
-        s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.dni.includes(searchTerm)
-    );
+    const displayStudents = searchResults || students;
 
     const isOverpaid = totalAmountPaid > Number(paymentData.totalCost);
     const debtAmount = Number(paymentData.totalCost) - totalAmountPaid;
@@ -862,105 +885,118 @@ export default function Students() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {loading ? (
+                {loading || isSearching ? (
                     <p className="text-center text-slate-500 col-span-full py-12">Cargando...</p>
-                ) : filteredStudents.length === 0 ? (
+                ) : displayStudents.length === 0 ? (
                     <div className="text-center text-slate-500 col-span-full py-12 bg-white rounded-2xl border border-dashed border-slate-200">
                         <p>No se encontraron alumnos</p>
                     </div>
                 ) : (
-                    filteredStudents.map(student => {
-                        const studentCategory = student.categoryId ? getCategoryById(student.categoryId) : null;
+                    <>
+                        {displayStudents.map(student => {
+                            const studentCategory = student.categoryId ? getCategoryById(student.categoryId) : null;
 
-                        return (
-                            <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
-                                {student.hasDebt && (
-                                    <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
-                                )}
-
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors">
-                                        <User className="w-6 h-6" />
-                                    </div>
-                                    <div className="flex gap-2">
-                                        {student.hasDebt && (
-                                            <button
-                                                onClick={() => handleOpenDebt(student)}
-                                                className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200 transition-colors flex items-center gap-1"
-                                                title="Pagar Deuda"
-                                            >
-                                                <DollarSign className="w-3 h-3" /> Pagar
-                                            </button>
-                                        )}
-                                        <button onClick={() => handleEdit(student)} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
-                                            <Pencil className="w-4 h-4" />
-                                        </button>
-                                        <button onClick={() => handleDelete(student.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
-                                    {student.fullName}
+                            return (
+                                <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
                                     {student.hasDebt && (
-                                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold ml-2 animate-pulse">
-                                            DEUDA
-                                        </span>
+                                        <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
                                     )}
-                                    {studentCategory && (
-                                        <span
-                                            className="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider"
-                                            style={{
-                                                backgroundColor: studentCategory.color ? `${studentCategory.color}20` : '#f1f5f9',
-                                                color: studentCategory.color || '#64748b'
-                                            }}
-                                        >
-                                            {studentCategory.name}
-                                        </span>
+
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors">
+                                            <User className="w-6 h-6" />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {student.hasDebt && (
+                                                <button
+                                                    onClick={() => handleOpenDebt(student)}
+                                                    className="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200 transition-colors flex items-center gap-1"
+                                                    title="Pagar Deuda"
+                                                >
+                                                    <DollarSign className="w-3 h-3" /> Pagar
+                                                </button>
+                                            )}
+                                            <button onClick={() => handleEdit(student)} className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors">
+                                                <Pencil className="w-4 h-4" />
+                                            </button>
+                                            <button onClick={() => handleDelete(student.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2">
+                                        {student.fullName}
+                                        {student.hasDebt && (
+                                            <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-bold ml-2 animate-pulse">
+                                                DEUDA
+                                            </span>
+                                        )}
+                                        {studentCategory && (
+                                            <span
+                                                className="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider"
+                                                style={{
+                                                    backgroundColor: studentCategory.color ? `${studentCategory.color}20` : '#f1f5f9',
+                                                    color: studentCategory.color || '#64748b'
+                                                }}
+                                            >
+                                                {studentCategory.name}
+                                            </span>
+                                        )}
+                                        {student.observations && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
+                                                Con observaciones
+                                            </span>
+                                        )}
+                                    </h3>
+                                    <p className="text-sm text-slate-400 font-mono mb-4">
+                                        DNI: {student.dni.startsWith('TEMP_') ? '(Sin DNI)' : student.dni}
+                                    </p>
+
+                                    <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
+                                        <Phone className="w-4 h-4" />
+                                        <span>{(!student.phone || student.phone.toUpperCase() === 'SIN OBSERVACIONES') ? 'Sin teléfono' : student.phone}</span>
+                                    </div>
+                                    {student.studentCode && (
+                                        <div className="flex items-center gap-2 text-sm text-sky-600 font-mono mb-4 bg-sky-50 px-2 py-1 rounded w-fit">
+                                            <span className="font-bold">#{student.studentCode}</span>
+                                        </div>
                                     )}
-                                    {student.observations && (
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold uppercase tracking-wider">
-                                            Con observaciones
+
+                                    <div className="flex justify-between items-center pt-4 border-t border-slate-50">
+                                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${calculateRealRemaining(student) > 0
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                            {calculateRealRemaining(student)} Clases
                                         </span>
-                                    )}
-                                </h3>
-                                <p className="text-sm text-slate-400 font-mono mb-4">
-                                    DNI: {student.dni.startsWith('TEMP_') ? '(Sin DNI)' : student.dni}
+
+                                        <div className="flex gap-2">
+
+                                            <button
+                                                onClick={() => handleOpenRecharge(student)}
+                                                className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                            >
+                                                <CreditCard className="w-4 h-4" />
+                                                Recargar
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {/* Message for limited view */}
+                        {!searchResults && students.length >= 50 && (
+                            <div className="col-span-full mt-8 p-6 bg-slate-50 rounded-2xl border border-slate-200 text-center">
+                                <p className="text-slate-600 font-medium">
+                                    Mostrando los primeros 50 alumnos activos.
                                 </p>
-
-                                <div className="flex items-center gap-2 text-sm text-slate-500 mb-4">
-                                    <Phone className="w-4 h-4" />
-                                    <span>{(!student.phone || student.phone.toUpperCase() === 'SIN OBSERVACIONES') ? 'Sin teléfono' : student.phone}</span>
-                                </div>
-                                {student.studentCode && (
-                                    <div className="flex items-center gap-2 text-sm text-sky-600 font-mono mb-4 bg-sky-50 px-2 py-1 rounded w-fit">
-                                        <span className="font-bold">#{student.studentCode}</span>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${calculateRealRemaining(student) > 0
-                                        ? 'bg-emerald-100 text-emerald-700'
-                                        : 'bg-slate-100 text-slate-500'
-                                        }`}>
-                                        {calculateRealRemaining(student)} Clases
-                                    </span>
-
-                                    <div className="flex gap-2">
-
-                                        <button
-                                            onClick={() => handleOpenRecharge(student)}
-                                            className="bg-sky-50 hover:bg-sky-100 text-sky-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                                        >
-                                            <CreditCard className="w-4 h-4" />
-                                            Recargar
-                                        </button>
-                                    </div>
-                                </div>
+                                <p className="text-slate-500 text-sm mt-1">
+                                    Si no encuentras al alumno, búscalo por su nombre en la barra de arriba.
+                                </p>
                             </div>
-                        );
-                    })
+                        )}
+                    </>
                 )}
             </div>
 

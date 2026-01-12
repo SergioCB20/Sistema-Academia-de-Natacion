@@ -223,14 +223,39 @@ export const studentService = {
      * Here we just fetch active ones.
      */
     async search(term: string): Promise<Student[]> {
-        const q = query(
+        const uppercaseTerm = term.toUpperCase();
+
+        // 1. Try search by Name prefix
+        const nameQuery = query(
             collection(db, STUDENTS_COLLECTION),
-            where('fullName', '>=', term),
-            where('fullName', '<=', term + '\uf8ff'),
-            limit(100)
+            where('fullName', '>=', uppercaseTerm),
+            where('fullName', '<=', uppercaseTerm + '\uf8ff'),
+            limit(50)
         );
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as Student);
+        const nameSnap = await getDocs(nameQuery);
+        let results = nameSnap.docs.map(doc => doc.data() as Student);
+
+        // 2. If no results or term looks like DNI, try DNI prefix
+        if (results.length === 0 || /^\d+$/.test(term)) {
+            const dniQuery = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('dni', '>=', term),
+                where('dni', '<=', term + '\uf8ff'),
+                limit(50)
+            );
+            const dniSnap = await getDocs(dniQuery);
+            const dniResults = dniSnap.docs.map(doc => doc.data() as Student);
+
+            // Combine results and remove duplicates
+            const existingIds = new Set(results.map(r => r.id));
+            dniResults.forEach(r => {
+                if (!existingIds.has(r.id)) {
+                    results.push(r);
+                }
+            });
+        }
+
+        return results.slice(0, 50);
     },
     /**
      * Get active students filtered by season
@@ -259,7 +284,7 @@ export const studentService = {
             collection(db, STUDENTS_COLLECTION),
             where('active', '==', true),
             orderBy('fullName'),
-            limit(5000)
+            limit(50)
         );
 
         const snapshot = await getDocs(q);
