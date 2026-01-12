@@ -16,7 +16,7 @@ import { db } from '../lib/firebase';
 import { loggingService } from './logging';
 import { scheduleTemplateService } from './scheduleTemplateService';
 import { categoryService } from './categoryService';
-// import { studentService } from './students';
+import { studentService } from './students';
 import { getMonthsInRange } from '../utils/monthUtils';
 import type { MonthlySlot, MonthlyEnrollment, Student, DayType } from '../types/db';
 
@@ -498,6 +498,64 @@ export const monthlyScheduleService = {
     },
 
     /**
+     * Cleanup orphan enrollments: Remove enrollments for students that no longer exist.
+     * This fixes capacity counts and prevents showing deleted students.
+     */
+    async cleanupOrphanEnrollments(seasonId: string): Promise<{ slotsProcessed: number, enrollmentsRemoved: number }> {
+        try {
+            // 1. Get all active student IDs
+            const studentsQuery = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('seasonId', '==', seasonId)
+            );
+            const studentsSnapshot = await getDocs(studentsQuery);
+            const existingStudentIds = new Set(studentsSnapshot.docs.map(doc => doc.id));
+
+            // 2. Get all monthly slots for this season
+            const slotsQuery = query(
+                collection(db, MONTHLY_SLOTS_COLLECTION),
+                where('seasonId', '==', seasonId)
+            );
+            const slotsSnapshot = await getDocs(slotsQuery);
+
+            const batch = writeBatch(db);
+            let slotsProcessed = 0;
+            let enrollmentsRemoved = 0;
+
+            for (const slotDoc of slotsSnapshot.docs) {
+                const slot = slotDoc.data();
+                const enrollments = slot.enrolledStudents || [];
+
+                // Filter to keep only enrollments for existing students
+                const validEnrollments = enrollments.filter((e: any) => existingStudentIds.has(e.studentId));
+                const removedCount = enrollments.length - validEnrollments.length;
+
+                if (removedCount > 0) {
+                    batch.update(slotDoc.ref, {
+                        enrolledStudents: validEnrollments,
+                        updatedAt: Timestamp.now()
+                    });
+                    slotsProcessed++;
+                    enrollmentsRemoved += removedCount;
+                }
+            }
+
+            if (enrollmentsRemoved > 0) {
+                await batch.commit();
+                await loggingService.addLog(
+                    `Limpieza de inscripciones: ${enrollmentsRemoved} inscripciones huérfanas eliminadas de ${slotsProcessed} horarios.`,
+                    'INFO'
+                );
+            }
+
+            return { slotsProcessed, enrollmentsRemoved };
+        } catch (error) {
+            console.error('Error in cleanupOrphanEnrollments:', error);
+            throw error;
+        }
+    },
+
+    /**
      * Cleanup utility to move students from old format IDs to new stable IDs 
      * and delete orphaned/duplicate slots.
      */
@@ -636,32 +694,16 @@ export const monthlyScheduleService = {
             };
         }
 
-        // Fetch active students belonging to THIS season to filter orphaned enrollments
-        const studentsQuery = query(
-            collection(db, STUDENTS_COLLECTION),
-            where('active', '==', true),
-            where('seasonId', '==', seasonId)
-        );
-        const studentsSnapshot = await getDocs(studentsQuery);
-        const activeStudentIds = new Set(studentsSnapshot.docs.map(doc => doc.id));
-
-        // Get capacity from first slot logic needs to be smarter
-        // Find the slot corresponding to "Current Month" or the first available future slot
+        // Fetch ONLY students enrolled in the relevant slot to filter orphaned records efficiently
         const { formatMonthId } = await import('../utils/monthUtils');
         const currentMonth = formatMonthId(new Date());
-
-        const slots = snapshot.docs.map(doc => doc.data()).sort((a, b) => a.month.localeCompare(b.month));
+        const slots = snapshot.docs.map(doc => doc.data() as MonthlySlot).sort((a, b) => a.month.localeCompare(b.month));
 
         // Find the relevant slot: The one for current month, or the first one if we are before season, or last if we are after
         let relevantSlot = slots.find(s => s.month >= currentMonth);
-
-        // If no future slot found (season ended?), use the last one just to show something, or the first one.
-        if (!relevantSlot) {
-            relevantSlot = slots[slots.length - 1]; // Fallback to last slot
-        }
+        if (!relevantSlot) relevantSlot = slots[slots.length - 1];
 
         if (!relevantSlot) {
-            // Should not happen as we checked snapshot.empty
             return {
                 totalCapacity: 0,
                 currentEnrollment: 0,
@@ -671,6 +713,15 @@ export const monthlyScheduleService = {
             };
         }
 
+        const candidateStudentIds = Array.from(new Set((relevantSlot.enrolledStudents || []).map((e: any) => e.studentId)));
+
+        let activeStudentIds: Set<string> = new Set();
+        if (candidateStudentIds.length > 0) {
+            const studentsData = await studentService.getByIds(candidateStudentIds);
+            activeStudentIds = new Set(studentsData.filter(s => s.active !== false).map(s => s.id));
+        }
+
+        // All slot logic moved up during optimization
         const totalCapacity = relevantSlot.capacity || 0;
 
         // Filter out orphaned enrollments (students that no longer exist)

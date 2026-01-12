@@ -2,9 +2,27 @@ import { useState, useEffect, useCallback } from 'react';
 import { studentService } from '../services/students';
 import type { Student } from '../types/db';
 
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos - capacidad en tiempo real, estudiantes optimizados
-let cachedStudents: Student[] = [];
-let lastFetch = 0;
+const CACHE_KEY = 'los_parrales_students_cache';
+const CACHE_TIME_KEY = 'los_parrales_students_cache_time';
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos
+
+// Load initial state from localStorage if available
+let initialCached: Student[] = [];
+let initialLastFetch = 0;
+
+try {
+    const stored = localStorage.getItem(CACHE_KEY);
+    const storedTime = localStorage.getItem(CACHE_TIME_KEY);
+    if (stored && storedTime) {
+        initialCached = JSON.parse(stored);
+        initialLastFetch = parseInt(storedTime, 10);
+    }
+} catch (e) {
+    console.warn('Error loading students from localStorage', e);
+}
+
+let cachedStudents: Student[] = initialCached;
+let lastFetch = initialLastFetch;
 let isFetching = false;
 
 export function useStudentsCache() {
@@ -31,6 +49,11 @@ export function useStudentsCache() {
             const data = await studentService.getAllActive();
             cachedStudents = data;
             lastFetch = now;
+
+            // Persist to localStorage
+            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            localStorage.setItem(CACHE_TIME_KEY, now.toString());
+
             setStudents(data);
             setError(null);
             return data;
@@ -47,6 +70,8 @@ export function useStudentsCache() {
     const invalidateCache = useCallback(() => {
         cachedStudents = [];
         lastFetch = 0;
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(CACHE_TIME_KEY);
     }, []);
 
     // Cargar al montar
@@ -58,6 +83,7 @@ export function useStudentsCache() {
         setStudents(prev => {
             const resolved = typeof newData === 'function' ? newData(prev) : newData;
             cachedStudents = resolved;
+            localStorage.setItem(CACHE_KEY, JSON.stringify(resolved));
             return resolved;
         });
     }, []);

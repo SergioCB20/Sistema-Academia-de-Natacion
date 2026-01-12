@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Users, Search, Trash2, X, CheckCircle } from 'lucide-react';
 import { monthlyScheduleService } from '../services/monthlyScheduleService';
 import { categoryService } from '../services/categoryService';
 import { studentService } from '../services/students';
-import { useStudentsCache } from '../hooks/useStudentsCache';
 import { useSeason } from '../contexts/SeasonContext';
 import { formatMonthId, getMonthName, getNextMonth, getPreviousMonth, parseMonthId } from '../utils/monthUtils';
 import { calculateRealRemaining } from '../utils/studentUtils';
@@ -27,8 +26,6 @@ export default function MonthlySchedule() {
 
     const [currentMonth, setCurrentMonth] = useState(getInitialMonth());
     const [slots, setSlots] = useState<MonthlySlot[]>([]);
-    // Use cache hook for students
-    const { students: cachedStudents, setStudents } = useStudentsCache();
     const [categories, setCategories] = useState<Category[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -37,6 +34,12 @@ export default function MonthlySchedule() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [viewMode, setViewMode] = useState<'list' | 'add' | 'attendance'>('list');
     const [searchTerm, setSearchTerm] = useState('');
+    // OPTIMIZATION: Students are loaded only when modal opens (not on page load)
+    const [modalStudents, setModalStudents] = useState<Student[]>([]);
+    const [modalStudentsLoading, setModalStudentsLoading] = useState(false);
+    // For "Agregar" tab - all season students (lazy loaded)
+    const [allSeasonStudents, setAllSeasonStudents] = useState<Student[]>([]);
+    const [allSeasonStudentsLoaded, setAllSeasonStudentsLoaded] = useState(false);
     const [bookingLoading, setBookingLoading] = useState(false);
 
     // Update month when season changes
@@ -50,11 +53,24 @@ export default function MonthlySchedule() {
         loadData();
     }, [currentMonth, currentSeason]);
 
-    // Filter cached students by season
-    const students = useMemo(() => {
-        if (!currentSeason || !cachedStudents) return [];
-        return cachedStudents.filter(s => s.seasonId === currentSeason.id);
-    }, [cachedStudents, currentSeason]);
+    // Load students for a specific slot (only when modal opens)
+    const loadStudentsForSlot = async (slot: MonthlySlot) => {
+        const studentIds = (slot.enrolledStudents || []).map(e => e.studentId);
+        if (studentIds.length === 0) {
+            setModalStudents([]);
+            return;
+        }
+        setModalStudentsLoading(true);
+        try {
+            const students = await studentService.getByIds(studentIds);
+            setModalStudents(students);
+        } catch (error) {
+            console.error('Error loading students for slot:', error);
+            setModalStudents([]);
+        } finally {
+            setModalStudentsLoading(false);
+        }
+    };
 
     const loadData = async () => {
         if (!currentSeason) return;
@@ -95,9 +111,12 @@ export default function MonthlySchedule() {
     const canGoPrev = currentSeason ? currentMonth > currentSeason.startMonth : false;
     const canGoNext = currentSeason ? currentMonth < currentSeason.endMonth : false;
 
-    const openModal = (slot: MonthlySlot) => {
+    const openModal = async (slot: MonthlySlot) => {
         setSelectedSlot(slot);
         setIsModalOpen(true);
+        setViewMode('list');
+        // OPTIMIZATION: Load only students enrolled in this slot
+        await loadStudentsForSlot(slot);
     };
 
     const handleUnenroll = async (studentId: string, studentName: string) => {
@@ -124,7 +143,19 @@ export default function MonthlySchedule() {
         }
     };
 
-    const filteredStudents = students.filter(s =>
+    // Lazy load all season students only when "Agregar" tab is clicked
+    const loadAllSeasonStudents = async () => {
+        if (allSeasonStudentsLoaded || !currentSeason) return;
+        try {
+            const allStudents = await studentService.getBySeason(currentSeason.id);
+            setAllSeasonStudents(allStudents);
+            setAllSeasonStudentsLoaded(true);
+        } catch (error) {
+            console.error('Error loading season students:', error);
+        }
+    };
+
+    const filteredStudents = allSeasonStudents.filter((s: Student) =>
         s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         s.dni.includes(searchTerm)
     );
@@ -298,10 +329,6 @@ export default function MonthlySchedule() {
 
                                                                 const category = categories.find(c => c.id === slot.categoryId);
                                                                 const occupiedSeats = calculateOccupiedSeats(slot.enrolledStudents || [], slot);
-                                                                const hasDebtor = slot.enrolledStudents?.some(enrollment => {
-                                                                    const student = students.find(s => s.id === enrollment.studentId);
-                                                                    return student?.hasDebt;
-                                                                });
                                                                 const available = slot.capacity - occupiedSeats;
                                                                 const colorClass = getStatusColor(slot.capacity, occupiedSeats);
 
@@ -309,47 +336,30 @@ export default function MonthlySchedule() {
                                                                     <button
                                                                         key={slot.id}
                                                                         onClick={() => openModal(slot)}
-                                                                        className={`w-full rounded-lg border p-3 transition-all ${hasDebtor
-                                                                            ? 'bg-orange-100 border-orange-300 ring-2 ring-orange-400 ring-offset-1 shadow-sm'
-                                                                            : `${colorClass} hover:shadow-md`
-                                                                            }`}
+                                                                        className={`w-full rounded-lg border p-3 transition-all ${colorClass} hover:shadow-md`}
                                                                     >
                                                                         <div className="flex flex-col gap-2">
                                                                             <div className="flex items-center justify-between">
                                                                                 <div className="flex flex-col text-left">
-                                                                                    <span className={`text-[10px] font-mono font-bold opacity-60 ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                                    <span className="text-[10px] font-mono font-bold opacity-60">
                                                                                         {slot.timeSlot}
                                                                                     </span>
-                                                                                    <span className={`text-xs font-bold ${hasDebtor ? 'text-orange-900' : ''}`}>
+                                                                                    <span className="text-xs font-bold">
                                                                                         {category?.name || 'Sin categoría'}
                                                                                     </span>
                                                                                 </div>
-                                                                                {occupiedSeats >= slot.capacity && !hasDebtor && (
+                                                                                {occupiedSeats >= slot.capacity && (
                                                                                     <span className="text-[10px] font-bold bg-white/50 px-1.5 rounded">LLENO</span>
-                                                                                )}
-                                                                                {hasDebtor && (
-                                                                                    <span className="text-[10px] font-bold bg-white/50 text-orange-800 px-1.5 rounded animate-pulse">DEUDA</span>
                                                                                 )}
                                                                             </div>
                                                                             <div className="flex items-center justify-between">
                                                                                 <div className="flex items-center gap-1">
-                                                                                    {hasDebtor ? (
-                                                                                        <div className="flex items-center gap-1 text-orange-700">
-                                                                                            <Users className="w-3 h-3" />
-                                                                                            <span className="text-xs font-mono font-bold">
-                                                                                                {occupiedSeats}/{slot.capacity}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    ) : (
-                                                                                        <div className="flex items-center gap-1">
-                                                                                            <Users className="w-3 h-3" />
-                                                                                            <span className="text-xs font-mono font-bold">
-                                                                                                {occupiedSeats}/{slot.capacity}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    )}
+                                                                                    <Users className="w-3 h-3" />
+                                                                                    <span className="text-xs font-mono font-bold">
+                                                                                        {occupiedSeats}/{slot.capacity}
+                                                                                    </span>
                                                                                 </div>
-                                                                                <span className={`text-[10px] font-medium ${hasDebtor ? 'text-orange-800/70' : 'opacity-70'}`}>
+                                                                                <span className="text-[10px] font-medium opacity-70">
                                                                                     {available} disponible{available !== 1 ? 's' : ''}
                                                                                 </span>
                                                                             </div>
@@ -442,7 +452,7 @@ export default function MonthlySchedule() {
                                             Asistencia
                                         </button>
                                         <button
-                                            onClick={() => setViewMode('add')}
+                                            onClick={() => { setViewMode('add'); loadAllSeasonStudents(); }}
                                             className={`flex-1 py-3 text-sm font-bold transition-colors ${viewMode === 'add'
                                                 ? 'text-sky-600 border-b-2 border-sky-600'
                                                 : 'text-slate-400 hover:text-slate-600'
@@ -473,7 +483,11 @@ export default function MonthlySchedule() {
                                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
                                         {viewMode === 'list' ? (
                                             // LIST VIEW
-                                            (validCount === 0) ? (
+                                            modalStudentsLoading ? (
+                                                <div className="flex items-center justify-center py-12 text-slate-400">
+                                                    <span>Cargando...</span>
+                                                </div>
+                                            ) : (validCount === 0) ? (
                                                 <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                                                     <Users className="w-12 h-12 mb-3 opacity-20" />
                                                     <p>No hay alumnos inscritos</p>
@@ -486,7 +500,7 @@ export default function MonthlySchedule() {
                                                 </div>
                                             ) : (
                                                 validEnrollments.map((enrollment: MonthlyEnrollment) => {
-                                                    const student = students.find(s => s.id === enrollment.studentId);
+                                                    const student = modalStudents.find((s: Student) => s.id === enrollment.studentId);
 
                                                     // Use Student profile dates if available, otherwise fall back to enrollment snapshot
                                                     // This ensures that if the student date is edited, the schedule reflects it immediately
@@ -531,7 +545,7 @@ export default function MonthlySchedule() {
                                                                         </p>
                                                                         {(() => {
                                                                             const tCredits = student?.remainingCredits || 0;
-                                                                            const aCount = student?.asistencia?.filter(a => a.asistencia).length || 0;
+                                                                            const aCount = student?.asistencia?.filter((a: { asistencia: boolean }) => a.asistencia).length || 0;
                                                                             const finished = aCount >= tCredits && tCredits > 0;
                                                                             if (finished) {
                                                                                 return (
@@ -611,11 +625,11 @@ export default function MonthlySchedule() {
 
                                                 <div className="space-y-2 pb-10">
                                                     {validEnrollments.map((enrollment: MonthlyEnrollment) => {
-                                                        const student = students.find(s => s.id === enrollment.studentId);
+                                                        const student = modalStudents.find((s: Student) => s.id === enrollment.studentId);
                                                         if (!student) return null;
 
                                                         const activeBalance = student.remainingCredits || 0;
-                                                        const attendedCount = student.asistencia?.filter(a => a.asistencia).length || 0;
+                                                        const attendedCount = student.asistencia?.filter((a: { asistencia: boolean }) => a.asistencia).length || 0;
                                                         const estimatedTotal = activeBalance + attendedCount;
 
                                                         const isPackageExpired = student.packageEndDate && new Date(student.packageEndDate) < new Date();
@@ -625,7 +639,7 @@ export default function MonthlySchedule() {
                                                         const dateInput = document.getElementById('attendance-date') as HTMLInputElement;
                                                         const selectedDate = dateInput?.value || new Date().toISOString().split('T')[0];
 
-                                                        const hasAttended = student.asistencia?.some(a => a.fecha === selectedDate && a.asistencia);
+                                                        const hasAttended = student.asistencia?.some((a: { fecha: string, asistencia: boolean }) => a.fecha === selectedDate && a.asistencia);
 
                                                         return (
                                                             <div key={student.id} className={`flex items-center justify-between p-3 rounded-xl border transition-all ${hasAttended ? 'bg-emerald-50 border-emerald-200' : 'border-slate-100 hover:bg-slate-50'}`}>
@@ -662,7 +676,7 @@ export default function MonthlySchedule() {
                                                                             await studentService.markAttendance(student.id, date, newStatus);
 
                                                                             // 2. OPTIMIZATION: Update Local State instead of re-fetching ALL students (saves N reads)
-                                                                            setStudents(prevStudents => prevStudents.map(s => {
+                                                                            setModalStudents((prevStudents: Student[]) => prevStudents.map((s: Student) => {
                                                                                 if (s.id === student.id) {
                                                                                     const currentAttendance = s.asistencia ? [...s.asistencia] : [];
                                                                                     const existingIndex = currentAttendance.findIndex(a => a.fecha === date);
@@ -683,7 +697,7 @@ export default function MonthlySchedule() {
                                                                                     }
 
                                                                                     // Sort by date desc
-                                                                                    currentAttendance.sort((a, b) => b.fecha.localeCompare(a.fecha));
+                                                                                    currentAttendance.sort((a: { fecha: string }, b: { fecha: string }) => b.fecha.localeCompare(a.fecha));
 
                                                                                     return { ...s, asistencia: currentAttendance, remainingCredits: newCredits };
                                                                                 }
@@ -713,7 +727,7 @@ export default function MonthlySchedule() {
                                             filteredStudents.length === 0 ? (
                                                 <p className="text-center text-slate-400 py-8">No se encontraron alumnos</p>
                                             ) : (
-                                                filteredStudents.map(student => {
+                                                filteredStudents.map((student: Student) => {
                                                     const isEnrolled = selectedSlot.enrolledStudents?.some(e => e.studentId === student.id);
                                                     const hasCredits = student.remainingCredits > 0;
                                                     // Note: Debt check was visual.

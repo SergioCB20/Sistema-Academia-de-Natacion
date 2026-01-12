@@ -12,7 +12,8 @@ import {
     runTransaction,
     increment,
     deleteDoc,
-    Timestamp
+    Timestamp,
+    writeBatch
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -266,6 +267,30 @@ export const studentService = {
     },
 
     /**
+     * Get students by a list of IDs (optimized - only reads specified documents)
+     * Used for loading enrolled students in a specific slot without fetching all students.
+     */
+    async getByIds(studentIds: string[]): Promise<Student[]> {
+        if (!studentIds || studentIds.length === 0) return [];
+
+        // Firestore limits 'in' queries to 30 items, so we batch if needed
+        const results: Student[] = [];
+        const batchSize = 30;
+
+        for (let i = 0; i < studentIds.length; i += batchSize) {
+            const batch = studentIds.slice(i, i + batchSize);
+            const q = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('__name__', 'in', batch)
+            );
+            const snapshot = await getDocs(q);
+            results.push(...snapshot.docs.map(doc => doc.data() as Student));
+        }
+
+        return results;
+    },
+
+    /**
      * Adds credits to a student via a Payment transaction.
      * Updates 'students' (remainingCredits) and creates 'payments' log atomically.
      */
@@ -408,10 +433,14 @@ export const studentService = {
 
     /**
      * Hard deletes a student.
-     * WARNING: This can orphan related records (payments, debts) if not handled.
+     * Now also removes enrollments from all slots to prevent orphan records.
      */
     async delete(studentId: string, deleteFinancialData: boolean = false): Promise<void> {
         const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+
+        // First, get studentData BEFORE deleting so we have the seasonId
+        const studentDocSnap = await getDoc(studentRef);
+        const seasonId = studentDocSnap.exists() ? studentDocSnap.data()?.seasonId : null;
 
         await runTransaction(db, async (transaction) => {
             // 1. Get student to delete
@@ -496,7 +525,37 @@ export const studentService = {
                 console.log(`Eliminados ${paymentsSnap.size} pagos y ${debtsSnap.size} deudas del alumno ${studentId}`);
             } catch (error) {
                 console.error("Error cleaning up financial data:", error);
-                // Don't throw, student is already deleted
+            }
+        }
+
+        // 6. ALWAYS Remove enrollments from all slots
+        if (seasonId) {
+            try {
+                const slotsQ = query(
+                    collection(db, 'monthly_slots'),
+                    where('seasonId', '==', seasonId)
+                );
+                const slotsSnap = await getDocs(slotsQ);
+
+                const batch = writeBatch(db);
+                let removedCount = 0;
+
+                for (const slotDoc of slotsSnap.docs) {
+                    const enrollments = slotDoc.data().enrolledStudents || [];
+                    const filtered = enrollments.filter((e: any) => e.studentId !== studentId);
+
+                    if (filtered.length !== enrollments.length) {
+                        batch.update(slotDoc.ref, { enrolledStudents: filtered });
+                        removedCount += enrollments.length - filtered.length;
+                    }
+                }
+
+                if (removedCount > 0) {
+                    await batch.commit();
+                    console.log(`Eliminadas ${removedCount} inscripciones del alumno ${studentId} de los horarios`);
+                }
+            } catch (error) {
+                console.error("Error removing student enrollments from slots:", error);
             }
         }
     },
