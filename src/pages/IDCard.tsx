@@ -10,60 +10,82 @@ import type { Student, CardConfig, Category } from '../types/db';
 export default function IDCard() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
-    const [students, setStudents] = useState<Student[]>([]);
+    // const [students, setStudents] = useState<Student[]>([]); // Removed: Using server-side search
     const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
     const [cardConfig, setCardConfig] = useState<CardConfig | null>(null);
     const [categories, setCategories] = useState<Category[]>([]);
 
+    // Clear initial load of "all active" to rely on search
+    // useEffect(() => {
+    //     const init = async () => {
+    //         const data = await studentService.getAllActive();
+    //         setStudents(data);
+    //         ...
+    //     };
+    //     init();
+    // }, []);
+
     useEffect(() => {
         const init = async () => {
-            const data = await studentService.getAllActive();
-            setStudents(data);
+            // Only load config and categories initially
+            try {
+                // Load card configuration
+                const config = await cardConfigService.getConfig();
+                if (!config.printMargins) {
+                    config.printMargins = {
+                        top: '0mm',
+                        right: '45mm',
+                        bottom: '0mm',
+                        left: '58mm'
+                    };
+                }
+                setCardConfig(config);
 
-            // Load card configuration
-            const config = await cardConfigService.getConfig();
-            // Ensure printMargins exists for backward compatibility
-            if (!config.printMargins) {
-                config.printMargins = {
-                    top: '0mm',
-                    right: '45mm',
-                    bottom: '0mm',
-                    left: '58mm'
-                };
-            }
-            setCardConfig(config);
+                // Load categories
+                const cats = await categoryService.getAll();
+                setCategories(cats);
 
-            // Load categories
-            const cats = await categoryService.getAll();
-            setCategories(cats);
-
-            // Auto-open if DNI in URL
-            const dni = searchParams.get('dni');
-            if (dni) {
-                const found = data.find(s => s.dni === dni);
-                if (found) {
-                    setSelectedStudent(found);
-                    // Clear param
+                // Check URL params for DNI to auto-load specific student
+                const dni = searchParams.get('dni');
+                if (dni) {
+                    // Search directly for this DNI
+                    const results = await studentService.search(dni);
+                    const found = results.find(s => s.dni === dni);
+                    if (found) {
+                        setSelectedStudent(found);
+                        // We could also populate search results or just show the modal
+                        // Let's populate the filtered list with just this student so it's visible behind the modal
+                        setFilteredStudents([found]);
+                    }
                     setSearchParams({});
                 }
+            } catch (error) {
+                console.error("Error initializing ID Card view:", error);
             }
         };
         init();
     }, []);
 
+    // Server-side search effect
     useEffect(() => {
         if (!searchTerm.trim()) {
             setFilteredStudents([]);
             return;
         }
-        const lower = searchTerm.toLowerCase();
-        const filtered = students.filter(s =>
-            s.fullName.toLowerCase().includes(lower) ||
-            s.dni.includes(lower)
-        );
-        setFilteredStudents(filtered);
-    }, [searchTerm, students]);
+
+        const timer = setTimeout(async () => {
+            try {
+                // Use the shared robust search service (searches Name and DNI server-side)
+                const results = await studentService.search(searchTerm);
+                setFilteredStudents(results);
+            } catch (error) {
+                console.error("Error searching students:", error);
+            }
+        }, 500); // 500ms debounce
+
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
 
     const getCategoryName = (student: Student): string => {
         if (!student.categoryId) return student.category || '-';
