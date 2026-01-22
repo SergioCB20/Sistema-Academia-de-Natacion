@@ -616,6 +616,14 @@ export default function Students() {
     // EXPORT TO EXCEL HANDLER
     const handleExportToExcel = async () => {
         try {
+            if (!activeSeason) {
+                alert('No hay temporada activa');
+                return;
+            }
+
+            // Fetch ALL students from the active season (not just the paginated ones)
+            const allSeasonStudents = await studentService.getBySeason(activeSeason.id);
+
             // Fetch all payments to calculate total paid per student
             const { collection, getDocs } = await import('firebase/firestore');
             const { db } = await import('../lib/firebase');
@@ -633,8 +641,8 @@ export default function Students() {
                 }
             });
 
-            // Prepare data for export
-            const exportData = students.map(student => {
+            // Prepare data for export using ALL students from the season
+            const exportData = allSeasonStudents.map(student => {
                 const category = getCategoryById(student.categoryId);
 
                 // Format schedule
