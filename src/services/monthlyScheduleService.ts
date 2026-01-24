@@ -10,7 +10,8 @@ import {
     writeBatch,
     Timestamp,
     arrayUnion,
-    increment
+    increment,
+    updateDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { loggingService } from './logging';
@@ -56,21 +57,56 @@ export const monthlyScheduleService = {
         );
 
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
-            ...doc.data(),
-            id: doc.id,
-            createdAt: doc.data().createdAt?.toDate() || new Date(),
-            updatedAt: doc.data().updatedAt?.toDate() || new Date(),
-            enrolledStudents: (doc.data().enrolledStudents || []).map((enrollment: any) => ({
-                ...enrollment,
-                enrolledAt: enrollment.enrolledAt?.toDate() || new Date(),
-                endsAt: enrollment.endsAt?.toDate() || new Date(),
-                attendanceRecord: enrollment.attendanceRecord?.map((att: any) => ({
-                    ...att,
-                    markedAt: att.markedAt?.toDate()
+        const now = new Date();
+        const batch = writeBatch(db);
+        let updatesCount = 0;
+
+        const results = snapshot.docs.map(doc => {
+            const data = doc.data();
+            const originalEnrollments = data.enrolledStudents || [];
+
+            // Filter expired enrollments (Auto-cleanup)
+            const validEnrollments = originalEnrollments.filter((e: any) => {
+                // Handle various date formats (Timestamp or Date or String)
+                const end = e.endsAt?.toDate ? e.endsAt.toDate() : new Date(e.endsAt);
+                // Keep if end date is in future
+                return end.getTime() > now.getTime();
+            });
+
+            // If we found expired students, queue a cleanup update
+            if (validEnrollments.length !== originalEnrollments.length) {
+                batch.update(doc.ref, {
+                    enrolledStudents: validEnrollments,
+                    updatedAt: Timestamp.now()
+                });
+                updatesCount++;
+                data.enrolledStudents = validEnrollments; // Return the clean list to UI
+            }
+
+            return {
+                ...data,
+                id: doc.id,
+                createdAt: data.createdAt?.toDate() || new Date(),
+                updatedAt: data.updatedAt?.toDate() || new Date(),
+                enrolledStudents: (data.enrolledStudents || []).map((enrollment: any) => ({
+                    ...enrollment,
+                    enrolledAt: enrollment.enrolledAt?.toDate() || new Date(),
+                    endsAt: enrollment.endsAt?.toDate() || new Date(),
+                    attendanceRecord: enrollment.attendanceRecord?.map((att: any) => ({
+                        ...att,
+                        markedAt: att.markedAt?.toDate()
+                    }))
                 }))
-            }))
-        } as MonthlySlot));
+            } as MonthlySlot;
+        });
+
+        // Commit cleanup in background
+        if (updatesCount > 0) {
+            console.log(`🧹 Auto-cleaning ${updatesCount} slots with expired students...`);
+            batch.commit().catch(err => console.error("Error auto-cleaning slots:", err));
+        }
+
+        return results;
     },
 
     /**
@@ -85,6 +121,25 @@ export const monthlyScheduleService = {
         }
 
         const data = docSnap.data();
+
+        // Auto-cleanup for single fetch too?
+        // Maybe overkill, but consistent. Let's do a quick check.
+        const originalEnrollments = data.enrolledStudents || [];
+        const now = new Date();
+        const validEnrollments = originalEnrollments.filter((e: any) => {
+            const end = e.endsAt?.toDate ? e.endsAt.toDate() : new Date(e.endsAt);
+            return end.getTime() > now.getTime();
+        });
+
+        if (validEnrollments.length !== originalEnrollments.length) {
+            // Non-blocking update
+            updateDoc(docRef, {
+                enrolledStudents: validEnrollments,
+                updatedAt: Timestamp.now()
+            }).catch(e => console.error("Error auto-cleaning slot:", e));
+            data.enrolledStudents = validEnrollments;
+        }
+
         return {
             ...data,
             createdAt: data.createdAt?.toDate() || new Date(),
@@ -167,7 +222,8 @@ export const monthlyScheduleService = {
                 studentId,
                 studentName: student.fullName,
                 enrolledAt: requestedStartDate,
-                endsAt: student.packageEndDate ? new Date(student.packageEndDate) : new Date(),
+                // FIX: Set end time to end of day to prevent premature expiration
+                endsAt: student.packageEndDate ? new Date(`${student.packageEndDate}T23:59:59`) : new Date(),
                 creditsAllocated,
                 attendanceRecord: []
             };
@@ -405,6 +461,54 @@ export const monthlyScheduleService = {
                     remainingCredits: increment(-1)
                 });
             }
+        });
+    },
+
+    /**
+     * Updates an enrollment snapshot with fresh student data
+     * Critical for fixing data mismatches (e.g., package end date changed)
+     */
+    async updateEnrollmentSnapshot(slotId: string, student: Student): Promise<void> {
+        const slotRef = doc(db, MONTHLY_SLOTS_COLLECTION, slotId);
+
+        await runTransaction(db, async (transaction) => {
+            const slotDoc = await transaction.get(slotRef);
+            if (!slotDoc.exists()) throw new Error('Horario no encontrado.');
+
+            const slot = slotDoc.data() as MonthlySlot;
+            const enrollmentIndex = slot.enrolledStudents?.findIndex(e => e.studentId === student.id);
+
+            if (enrollmentIndex === -1 || enrollmentIndex === undefined) {
+                // Not enrolled, nothing to update
+                return;
+            }
+
+            const enrollment = slot.enrolledStudents[enrollmentIndex];
+
+            // Re-calculate endsAt based on student profile
+            const newEndsAt = student.packageEndDate ? new Date(`${student.packageEndDate}T23:59:59`) : new Date();
+
+            const updatedEnrollments = [...slot.enrolledStudents];
+            updatedEnrollments[enrollmentIndex] = {
+                ...enrollment,
+                studentName: student.fullName, // Sync name too just in case
+                endsAt: newEndsAt
+            };
+
+            transaction.update(slotRef, {
+                enrolledStudents: updatedEnrollments.map(e => ({
+                    ...e,
+                    enrolledAt: Timestamp.fromDate(toJsDate(e.enrolledAt)),
+                    endsAt: Timestamp.fromDate(toJsDate(e.endsAt)),
+                    attendanceRecord: e.attendanceRecord?.map(att => ({
+                        ...att,
+                        markedAt: att.markedAt ? Timestamp.fromDate(toJsDate(att.markedAt)) : null
+                    }))
+                })),
+                updatedAt: Timestamp.now()
+            });
+
+            console.log(`✅ Snapshot actualizado para ${student.fullName} en slot ${slot.timeSlot}`);
         });
     },
 
