@@ -439,6 +439,54 @@ export const studentService = {
             console.log(`   ⏭️ Skipping sync - no schedule/date changes`);
         }
 
+        // NEW: Always try to update snapshots if CRITICAL info changed (Name or Dates)
+        // This ensures MANUAL enrollments (not just fixed schedule) are kept in sync
+        if (dateChanged || updates.fullName) {
+            console.log(`   🔄 Updating manual enrollment snapshots for student...`);
+            try {
+                // We need to find ALL slots where student is enrolled
+                // This might be expensive if we search ALL slots. 
+                // But we can limit to current Season
+                if (currentData.seasonId) {
+                    const { monthlyScheduleService } = await import('./monthlyScheduleService');
+                    const { db } = await import('../lib/firebase');
+                    const { collection, query, where, getDocs } = await import('firebase/firestore');
+
+                    // Find slots with this student
+                    const q = query(
+                        collection(db, 'monthly_slots'),
+                        where('seasonId', '==', currentData.seasonId)
+                    );
+                    // We actuall need to filter client side or use array-contains if we indexed enrollment IDs... 
+                    // But we don't have enrollment IDs, just array of objects.
+                    // So we fetch season slots (cached usually?) or just query.
+                    // Optimization: Use getStudentEnrollments helper if available or similar?
+                    // Actually monthlyScheduleService has getStudentEnrollments(studentId, month).
+                    // But we need ALL months in season.
+
+                    // Let's iterate all slots for season (usually < 100 docs per season/month? No, 30 days * 10 slots = 300 docs).
+                    // It's a bit heavy but necessary for data consistency.
+                    const seasonSlotsCheck = await getDocs(q);
+                    const slotsWithStudent = seasonSlotsCheck.docs.filter(d => {
+                        const s = d.data();
+                        return s.enrolledStudents?.some((e: any) => e.studentId === id);
+                    });
+
+                    console.log(`   Found ${slotsWithStudent.length} slots to update snapshots.`);
+
+                    // Construct full student object for update
+                    const updatedStudentFull = { ...currentData, ...updates } as Student;
+
+                    // Update each found slot
+                    for (const slotDoc of slotsWithStudent) {
+                        await monthlyScheduleService.updateEnrollmentSnapshot(slotDoc.id, updatedStudentFull);
+                    }
+                }
+            } catch (e) {
+                console.error("Error updating enrollment snapshots:", e);
+            }
+        }
+
         // If student is being deactivated, decrement counter
         if (wasActive && !willBeActive) {
             const metadataRef = doc(db, 'metadata', 'counters');

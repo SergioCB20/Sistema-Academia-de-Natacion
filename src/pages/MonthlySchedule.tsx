@@ -64,6 +64,27 @@ export default function MonthlySchedule() {
         try {
             const students = await studentService.getByIds(studentIds);
             setModalStudents(students);
+
+            // SELF-HEALING: Check for date mismatches and fix them on the fly
+            // This fixes the "Grid says Full, Modal says Available" issue caused by stale snapshots
+            students.forEach(student => {
+                if (!student.packageEndDate) return;
+
+                const enrollment = slot.enrolledStudents?.find(e => e.studentId === student.id);
+                if (!enrollment) return;
+
+                const snapEnd = enrollment.endsAt instanceof Date ? enrollment.endsAt : new Date(enrollment.endsAt as any);
+                // Real end should be end of that day
+                const realEnd = new Date(student.packageEndDate + 'T23:59:59');
+
+                // If diff > 24 hours (significantly different date), sync it
+                const diff = Math.abs(snapEnd.getTime() - realEnd.getTime());
+                if (diff > 1000 * 60 * 60 * 24) {
+                    console.log(`🔧 Self-healing snapshot for ${student.fullName} (Snap: ${snapEnd.toISOString()}, Real: ${realEnd.toISOString()})`);
+                    monthlyScheduleService.updateEnrollmentSnapshot(slot.id, student).catch(console.error);
+                }
+            });
+
         } catch (error) {
             console.error('Error loading students for slot:', error);
             setModalStudents([]);
@@ -199,9 +220,14 @@ export default function MonthlySchedule() {
             const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
             const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
 
-            // Only count if enrollment overlaps with this month
+            // Only count if enrollment overlaps with this month AND is active today
+            // User request: Expired students should not count (as if deleted)
             if (start <= slotEnd && end >= slotStart) {
-                uniqueActiveStudents.add(e.studentId);
+                // Check if expired compared to NOW (Real-time check)
+                const now = new Date().getTime();
+                if (end >= now) {
+                    uniqueActiveStudents.add(e.studentId);
+                }
             }
         });
 
@@ -416,13 +442,36 @@ export default function MonthlySchedule() {
                                 }
                             );
 
-                            // For count: count ALL unique students with valid dates (don't filter by cache)
+                            // For count: count ALL unique students with valid dates (filter by cache/expiration if available)
                             const uniqueStudents = new Set<string>();
+                            const today = new Date();
+                            const todayTime = today.getTime();
+
                             (selectedSlot.enrolledStudents || []).forEach((e: MonthlyEnrollment) => {
                                 const start = (e.enrolledAt as any)?.toDate ? (e.enrolledAt as any).toDate().getTime() : new Date(e.enrolledAt || 0).getTime();
                                 const end = (e.endsAt as any)?.toDate ? (e.endsAt as any).toDate().getTime() : new Date(e.endsAt).getTime();
+
                                 if (start <= slotEnd && end >= slotStart) {
-                                    uniqueStudents.add(e.studentId);
+                                    // CHECK IF EXPIRED using loaded student data
+                                    const student = modalStudents.find(s => s.id === e.studentId);
+                                    let isExpired = false;
+
+                                    if (student && student.packageEndDate) {
+                                        // If we have student data, use the real packageEndDate
+                                        // Set to end of day to be safe or just strict comparison?
+                                        // If package ends today, they are still active today. Expires tomorrow.
+                                        // But if date < now, it depends on granularity.
+                                        // Let's assume packageEndDate is inclusive (YYYY-MM-DD). 
+                                        // So e.g. 2026-01-20 means valid UNTIL 2026-01-20 23:59:59.
+                                        const expiry = new Date(student.packageEndDate + 'T23:59:59');
+                                        if (expiry.getTime() < todayTime) {
+                                            isExpired = true;
+                                        }
+                                    }
+
+                                    if (!isExpired) {
+                                        uniqueStudents.add(e.studentId);
+                                    }
                                 }
                             });
 
@@ -528,6 +577,9 @@ export default function MonthlySchedule() {
                                                     const now = new Date();
                                                     const isFuture = startDate.getTime() > now.getTime();
                                                     const isExpired = endDate < now;
+
+                                                    // HIDE EXPIRED STUDENTS FROM LIST (User request: "eliminar directamente")
+                                                    if (isExpired) return null;
 
                                                     return (
                                                         <div
