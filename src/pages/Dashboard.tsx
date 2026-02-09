@@ -7,7 +7,9 @@ import { Clock, CheckCircle, AlertTriangle, XCircle, Info, RefreshCw, Filter } f
 
 export default function Dashboard() {
     const [stats, setStats] = useState({
+        totalStudents: 0,
         activeStudents: 0,
+        inactiveStudents: 0,
         newStudentsMonth: 0,
         incomeToday: 0
     });
@@ -85,9 +87,9 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <DashboardCard
-                    title="Alumnos Activos"
-                    value={loading ? '...' : stats.activeStudents}
-                    helper="Basado en matrícula vigente"
+                    title="Total Alumnos"
+                    value={loading ? '...' : stats.totalStudents}
+                    helper="Todos los alumnos de esta temporada"
                 />
                 <DashboardCard
                     title="Nuevos (Mes)"

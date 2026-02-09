@@ -1187,6 +1187,41 @@ export const studentService = {
     },
 
     /**
+     * Get detailed stats for the active season
+     */
+    async getSeasonStats(): Promise<{ total: number, active: number, inactive: number }> {
+        const { seasonService } = await import('./seasonService');
+        const activeSeason = await seasonService.getActiveSeason();
+
+        if (!activeSeason) return { total: 0, active: 0, inactive: 0 };
+
+        const q = query(
+            collection(db, STUDENTS_COLLECTION),
+            where('seasonId', '==', activeSeason.id)
+        );
+        const snapshot = await getDocs(q);
+
+        let active = 0;
+        let inactive = 0;
+
+        snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            // Check explicit active flag (default to true if undefined)
+            if (data.active !== false) {
+                active++;
+            } else {
+                inactive++;
+            }
+        });
+
+        return {
+            total: snapshot.size,
+            active,
+            inactive
+        };
+    },
+
+    /**
      * Mark attendance for a student on a specific date
      */
     async markAttendance(
