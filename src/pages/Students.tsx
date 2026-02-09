@@ -17,7 +17,8 @@ import {
     Clock,
     AlertCircle,
     AlertTriangle,
-    Download
+    Download,
+    UserX
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { studentService } from '../services/students';
@@ -85,6 +86,14 @@ export default function Students() {
         amount: '',
         newEndDate: ''
     });
+
+    // SUSPEND Modal State
+    const [isSuspendModalOpen, setIsSuspendModalOpen] = useState(false);
+    const [suspendSearchTerm, setSuspendSearchTerm] = useState('');
+    const [studentToSuspend, setStudentToSuspend] = useState<Student | null>(null);
+
+    // Filter State
+    const [showSuspended, setShowSuspended] = useState(false);
 
 
 
@@ -613,6 +622,42 @@ export default function Students() {
 
 
 
+    // SUSPEND HANDLERS
+    const handleOpenSuspend = () => {
+        setIsSuspendModalOpen(true);
+        setSuspendSearchTerm('');
+        setStudentToSuspend(null);
+    };
+
+    const handleConfirmSuspend = async () => {
+        if (!studentToSuspend) return;
+        if (!confirm(`¿Estás seguro de suspender a ${studentToSuspend.fullName}? Esto liberará sus cupos en el horario.`)) return;
+
+        setIsSaving(true);
+        try {
+            await studentService.suspendStudent(studentToSuspend.id);
+            // alert("Alumno suspendido exitosamente");
+            setIsSuspendModalOpen(false);
+            invalidateCache();
+            await refetchStudents();
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message || "Error al suspender alumno");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Filter students for suspension modal
+    const suspendSearchResults = useMemo(() => {
+        if (!suspendSearchTerm.trim()) return [];
+        const term = suspendSearchTerm.toLowerCase();
+        return cachedStudents.filter(s =>
+            s.fullName.toLowerCase().includes(term) ||
+            s.dni.includes(term)
+        ).slice(0, 5); // Limit to 5 results
+    }, [cachedStudents, suspendSearchTerm]);
+
     // EXPORT TO EXCEL HANDLER
     const handleExportToExcel = async () => {
         try {
@@ -653,11 +698,6 @@ export default function Students() {
                     horario = `${days} (${times})`;
                 }
 
-                // Count attendance (only "asistió" = true)
-                const asistenciaCount = student.asistencia
-                    ? student.asistencia.filter(a => a.asistencia === true).length
-                    : 0;
-
                 // Get total amount paid for this student
                 const montoPagado = paymentsByStudent[student.id] || 0;
 
@@ -668,8 +708,7 @@ export default function Students() {
                     'Edad': student.age || '',
                     'Categoria': category?.name || '',
                     'Horario': horario,
-                    'Asistencia': asistenciaCount,
-                    'Clases Restantes': student.remainingCredits || 0,
+                    'Clases Restantes': calculateRealRemaining(student),
                     'Monto Pagado': montoPagado,
                     'Observaciones': student.observations || ''
                 };
@@ -679,6 +718,7 @@ export default function Students() {
             const ws = XLSX.utils.json_to_sheet(exportData);
 
             // Set column widths
+            // Set column widths
             ws['!cols'] = [
                 { wch: 10 }, // Codigo
                 { wch: 30 }, // Nombre
@@ -686,7 +726,6 @@ export default function Students() {
                 { wch: 6 },  // Edad
                 { wch: 20 }, // Categoria
                 { wch: 30 }, // Horario
-                { wch: 10 }, // Asistencia
                 { wch: 15 }, // Clases Restantes
                 { wch: 15 }  // Monto Pagado
             ];
@@ -819,7 +858,34 @@ export default function Students() {
         setStep(step - 1);
     };
 
-    const displayStudents = searchResults || students;
+    const handleReactivate = async (studentId: string, studentName: string) => {
+        if (!confirm(`¿Estás seguro de reactivar a ${studentName}?`)) return;
+
+        setIsSaving(true);
+        try {
+            await studentService.reactivateStudent(studentId);
+            invalidateCache();
+            await refetchStudents();
+            alert(`Alumno ${studentName} reactivado exitosamente.`);
+        } catch (error: any) {
+            console.error(error);
+            alert("Error al reactivar alumno: " + error.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const displayStudents = useMemo(() => {
+        const list = searchResults || students;
+        // If searching, show everything found (even suspended)
+        if (searchResults) return list;
+
+        // If showing suspended, show ALL
+        if (showSuspended) return list;
+
+        // Default: Hide suspended active===false (undefined/null treated as true/active for legacy)
+        return list.filter(s => s.active !== false);
+    }, [searchResults, students, showSuspended]);
 
     const isOverpaid = totalAmountPaid > Number(paymentData.totalCost);
     const debtAmount = Number(paymentData.totalCost) - totalAmountPaid;
@@ -872,6 +938,22 @@ export default function Students() {
                         Exportar Excel
                     </button>
                     <button
+                        onClick={handleOpenSuspend}
+                        className="bg-amber-100 text-amber-700 px-4 py-3 rounded-xl font-bold hover:bg-amber-200 transition-all flex items-center gap-2 shadow-lg shadow-amber-500/10"
+                        title="Suspender Alumno"
+                    >
+                        <UserX className="w-5 h-5" />
+                        Suspender
+                    </button>
+                    <button
+                        onClick={() => setShowSuspended(!showSuspended)}
+                        className={`px-4 py-3 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg ${showSuspended ? 'bg-slate-700 text-white shadow-slate-900/20' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'}`}
+                        title={showSuspended ? "Ocultar Suspendidos" : "Mostrar Suspendidos"}
+                    >
+                        {showSuspended ? <CheckCircle className="w-5 h-5" /> : <UserX className="w-5 h-5" />}
+                        {showSuspended ? "Ocultar Suspendidos" : "Mostrar Suspendidos"}
+                    </button>
+                    <button
                         onClick={handleCreateNew}
                         className="bg-slate-900 text-white px-4 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg shadow-slate-900/20"
                     >
@@ -905,7 +987,12 @@ export default function Students() {
                             const studentCategory = student.categoryId ? getCategoryById(student.categoryId) : null;
 
                             return (
-                                <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
+                                <div key={student.id} className={`bg-white p-6 rounded-2xl shadow-sm border ${student.active === false ? 'border-slate-300 bg-slate-50 opacity-90' : student.hasDebt ? 'border-red-200' : 'border-slate-100'} hover:shadow-md transition-all group relative overflow-hidden`}>
+                                    {student.active === false && (
+                                        <div className="absolute top-0 right-0 bg-slate-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg z-10">
+                                            SUSPENDIDO
+                                        </div>
+                                    )}
                                     {student.hasDebt && (
                                         <div className="absolute top-0 left-0 right-0 h-1 bg-red-500" />
                                     )}
@@ -930,6 +1017,16 @@ export default function Students() {
                                             <button onClick={() => handleDelete(student.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
+
+                                            {student.active === false && (
+                                                <button
+                                                    onClick={() => handleReactivate(student.id, student.fullName)}
+                                                    className="p-2 ml-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-colors"
+                                                    title="Reactivar Alumno"
+                                                >
+                                                    <CheckCircle className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
 
@@ -1819,6 +1916,93 @@ export default function Students() {
                                 {isSaving ? 'Procesando...' : 'Confirmar Recarga'}
                             </button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* SUSPEND MODAL */}
+            {isSuspendModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-amber-50">
+                            <div>
+                                <h3 className="text-xl font-bold text-amber-800">Suspender Alumno</h3>
+                                <p className="text-sm text-amber-600">Busca el alumno para liberar sus horarios</p>
+                            </div>
+                            <button onClick={() => setIsSuspendModalOpen(false)} className="text-amber-400 hover:text-amber-600">✕</button>
+                        </div>
+
+                        <div className="p-6 space-y-4">
+                            {!studentToSuspend ? (
+                                <>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Buscar por nombre o DNI..."
+                                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                            value={suspendSearchTerm}
+                                            onChange={(e) => setSuspendSearchTerm(e.target.value)}
+                                            autoFocus
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2 mt-4 max-h-60 overflow-y-auto">
+                                        {suspendSearchTerm && suspendSearchResults.length === 0 && (
+                                            <p className="text-center text-slate-500 py-4">No se encontraron alumnos</p>
+                                        )}
+                                        {suspendSearchResults.map(student => (
+                                            <button
+                                                key={student.id}
+                                                onClick={() => setStudentToSuspend(student)}
+                                                className="w-full text-left p-3 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition-all flex items-center justify-between group"
+                                            >
+                                                <div>
+                                                    <p className="font-bold text-slate-700">{student.fullName}</p>
+                                                    <p className="text-xs text-slate-400">DNI: {student.dni}</p>
+                                                </div>
+                                                <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-sky-500" />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="space-y-4 animate-in slide-in-from-right-4 duration-200">
+                                    <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
+                                        <div className="flex items-start gap-3">
+                                            <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-1" />
+                                            <div>
+                                                <h4 className="font-bold text-amber-800">¿Confirmar suspensión?</h4>
+                                                <p className="text-sm text-amber-700 mt-1">
+                                                    Al suspender a <span className="font-bold">{studentToSuspend.fullName}</span>:
+                                                </p>
+                                                <ul className="list-disc list-inside text-sm text-amber-700 mt-2 space-y-1">
+                                                    <li>Se marcará como <strong>Inactivo</strong>.</li>
+                                                    <li>Se eliminará su horario fijo.</li>
+                                                    <li><strong>Se liberarán sus cupos</strong> en los horarios actuales y futuros.</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3 pt-2">
+                                        <button
+                                            onClick={() => setStudentToSuspend(null)}
+                                            className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50 transition-colors"
+                                        >
+                                            Atrás
+                                        </button>
+                                        <button
+                                            onClick={handleConfirmSuspend}
+                                            disabled={isSaving}
+                                            className="flex-1 bg-amber-500 text-white px-4 py-2 rounded-xl font-bold hover:bg-amber-600 transition-colors shadow-lg shadow-amber-500/20 disabled:opacity-50"
+                                        >
+                                            {isSaving ? 'Suspendiendo...' : 'Confirmar Suspensión'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

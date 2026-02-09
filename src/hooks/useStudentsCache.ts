@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { studentService } from '../services/students';
+import { seasonService } from '../services/seasonService';
 import type { Student } from '../types/db';
 
 const CACHE_KEY = 'los_parrales_students_cache';
@@ -46,7 +47,17 @@ export function useStudentsCache() {
         isFetching = true;
 
         try {
-            const data = await studentService.getAllActive();
+            const activeSeason = await seasonService.getActiveSeason();
+            let data: Student[] = [];
+
+            if (activeSeason) {
+                // Get ALL students for the season (active + inactive)
+                data = await studentService.getBySeason(activeSeason.id);
+            } else {
+                // Fallback (rare case)
+                data = await studentService.getAllActive();
+            }
+
             cachedStudents = data;
             lastFetch = now;
 

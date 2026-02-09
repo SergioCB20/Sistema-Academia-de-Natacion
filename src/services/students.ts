@@ -258,22 +258,20 @@ export const studentService = {
         return results.slice(0, 50);
     },
     /**
-     * Get active students filtered by season
+     * Get ALL students (active and inactive) filtered by season
      * NOTE: Filtering client-side to avoid requiring a composite index active+seasonId+fullName
      */
     async getBySeason(seasonId: string): Promise<Student[]> {
+        // Query by Season ID directly to ensure we get relevant students within the limit
         const q = query(
             collection(db, STUDENTS_COLLECTION),
-            where('active', '==', true),
-            orderBy('fullName'),
-            limit(5000)
+            where('seasonId', '==', seasonId),
+            // orderBy('fullName'), // REMOVED to fix Index Error immediately
+            limit(50)
         );
 
         const snapshot = await getDocs(q);
-        const allActive = snapshot.docs.map(doc => doc.data() as Student);
-
-        // Client-side filter
-        return allActive.filter(student => student.seasonId === seasonId);
+        return snapshot.docs.map(doc => doc.data() as Student);
     },
 
     /**
@@ -1273,6 +1271,78 @@ export const studentService = {
                 remainingCredits: credits
             });
         });
+    },
+
+    /**
+     * Suspend a student:
+     * 1. Set active = false
+     * 2. Clear fixedSchedule
+     * 3. Remove from ALL monthly slots (free up capacity)
+     */
+    async suspendStudent(studentId: string): Promise<void> {
+        const { monthlyScheduleService } = await import('./monthlyScheduleService');
+        const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+        const studentDoc = await getDoc(studentRef);
+
+        if (!studentDoc.exists()) throw new Error('Alumno no encontrado');
+
+        const student = studentDoc.data() as Student;
+
+        // 1. Remove from all slots in the current season (or student's season)
+        if (student.seasonId) {
+            await monthlyScheduleService.removeStudentFromAllSlots(student.seasonId, studentId);
+        }
+
+        // 2. Update student record
+        await updateDoc(studentRef, {
+            active: false,
+            fixedSchedule: [], // Clear schedule so they don't get auto-enrolled again
+            updatedAt: Timestamp.now()
+        });
+
+        // 3. Update active student counter (decrement)
+        const metadataRef = doc(db, 'metadata', 'counters');
+        await updateDoc(metadataRef, {
+            activeStudents: increment(-1),
+            lastSynced: Date.now()
+        }).catch(e => console.warn("Could not update counter", e));
+
+        await loggingService.addLog(
+            `Alumno ${student.fullName} suspendido (espacios liberados)`,
+            'WARNING'
+        );
+    },
+
+    /**
+     * Reactivate a suspended student
+     */
+    async reactivateStudent(studentId: string): Promise<void> {
+        const studentRef = doc(db, STUDENTS_COLLECTION, studentId);
+        const studentDoc = await getDoc(studentRef);
+
+        if (!studentDoc.exists()) throw new Error('Alumno no encontrado');
+
+        const student = studentDoc.data() as Student;
+
+        if (student.active) return; // Already active
+
+        // 1. Update student record
+        await updateDoc(studentRef, {
+            active: true,
+            updatedAt: Timestamp.now()
+        });
+
+        // 2. Update active student counter (increment)
+        const metadataRef = doc(db, 'metadata', 'counters');
+        await updateDoc(metadataRef, {
+            activeStudents: increment(1),
+            lastSynced: Date.now()
+        }).catch(e => console.warn("Could not update counter", e));
+
+        await loggingService.addLog(
+            `Alumno ${student.fullName} reactivado`,
+            'SUCCESS'
+        );
     }
 };
 

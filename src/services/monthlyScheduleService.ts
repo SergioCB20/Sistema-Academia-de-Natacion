@@ -1002,4 +1002,50 @@ export const monthlyScheduleService = {
             throw error;
         }
     },
+    async removeStudentFromAllSlots(seasonId: string, studentId: string): Promise<number> {
+        try {
+            // Get all slots for the season
+            const q = query(
+                collection(db, MONTHLY_SLOTS_COLLECTION),
+                where('seasonId', '==', seasonId)
+            );
+
+            const snapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            let slotsUpdated = 0;
+
+            snapshot.docs.forEach(docSnap => {
+                const slot = docSnap.data();
+                const enrollments = slot.enrolledStudents || [];
+
+                // Check if student is enrolled
+                const isEnrolled = enrollments.some((e: any) => e.studentId === studentId);
+
+                if (isEnrolled) {
+                    // Filter out the student
+                    const updatedEnrollments = enrollments.filter((e: any) => e.studentId !== studentId);
+
+                    batch.update(docSnap.ref, {
+                        enrolledStudents: updatedEnrollments,
+                        updatedAt: Timestamp.now()
+                    });
+
+                    slotsUpdated++;
+                }
+            });
+
+            if (slotsUpdated > 0) {
+                await batch.commit();
+                await loggingService.addLog(
+                    `Alumno ${studentId} removido de ${slotsUpdated} horarios en temporada ${seasonId}`,
+                    'WARNING' // Warning because it's a destructive action (suspension)
+                );
+            }
+
+            return slotsUpdated;
+        } catch (error) {
+            console.error('Error removing student from all slots:', error);
+            throw error;
+        }
+    }
 };
