@@ -667,7 +667,7 @@ export default function Students() {
             }
 
             // Fetch ALL students from the active season (not just the paginated ones)
-            const allSeasonStudents = await studentService.getBySeason(activeSeason.id);
+            const allSeasonStudents = await studentService.getBySeason(activeSeason.id, false);
 
             // Fetch all payments to calculate total paid per student
             const { collection, getDocs } = await import('firebase/firestore');

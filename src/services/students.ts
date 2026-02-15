@@ -260,15 +260,29 @@ export const studentService = {
     /**
      * Get ALL students (active and inactive) filtered by season
      * NOTE: Filtering client-side to avoid requiring a composite index active+seasonId+fullName
+     * @param seasonId - The season ID to filter by
+     * @param applyLimit - If true (default), fetch only 50 students. If false, fetch all students.
      */
-    async getBySeason(seasonId: string): Promise<Student[]> {
-        // Query by Season ID directly to ensure we get relevant students within the limit
-        const q = query(
-            collection(db, STUDENTS_COLLECTION),
-            where('seasonId', '==', seasonId),
-            // orderBy('fullName'), // REMOVED to fix Index Error immediately
-            limit(50)
-        );
+    async getBySeason(seasonId: string, applyLimit: boolean = true): Promise<Student[]> {
+        // Start building the query
+        let q;
+
+        if (applyLimit) {
+            // Query with limit
+            q = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('seasonId', '==', seasonId),
+                // orderBy('fullName'), // REMOVED to fix Index Error immediately
+                limit(50)
+            );
+        } else {
+            // Query without limit - fetch all students
+            q = query(
+                collection(db, STUDENTS_COLLECTION),
+                where('seasonId', '==', seasonId)
+                // orderBy('fullName'), // REMOVED to fix Index Error immediately
+            );
+        }
 
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => doc.data() as Student);
