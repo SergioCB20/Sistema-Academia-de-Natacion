@@ -12,14 +12,16 @@ export const dashboardService = {
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
 
-        const [activeStudents, newStudentsMonth, incomeToday] = await Promise.all([
-            studentService.getActiveStudentsCount(),
+        const [seasonStats, newStudentsMonth, incomeToday] = await Promise.all([
+            studentService.getSeasonStats(),
             studentService.getNewStudentsCount(now.getMonth(), now.getFullYear()),
             this.getIncomeToday(startOfDay, endOfDay)
         ]);
 
         return {
-            activeStudents,
+            totalStudents: seasonStats.total,
+            activeStudents: seasonStats.active,
+            inactiveStudents: seasonStats.inactive,
             newStudentsMonth,
             incomeToday
         };
