@@ -311,9 +311,10 @@ export default function Students() {
                 const info = await monthlyScheduleService.getScheduleCapacityInfo(
                     activeSeason.id,
                     template.dayType,
-                    template.timeSlot
+                    template.timeSlot,
+                    categoryId // Pass categoryId
                 );
-                return { key: `${template.dayType}-${template.timeSlot}`, info };
+                return { key: `${template.dayType}-${template.timeSlot}-${categoryId}`, info };
             });
 
             const results = await Promise.all(capacityPromises);
@@ -1290,7 +1291,7 @@ export default function Students() {
                                                                 );
 
                                                                 // Capacity Info
-                                                                const capInfo = capacityInfo[`${template.dayType}-${template.timeSlot}`];
+                                                                const capInfo = capacityInfo[`${template.dayType}-${template.timeSlot}-${formData.categoryId}`];
                                                                 const isFull = capInfo?.isFull;
                                                                 const isLoading = loadingCapacity || !capInfo;
 
@@ -1373,9 +1374,16 @@ export default function Students() {
                                                                                         )}
                                                                                     </div>
                                                                                 ) : (
-                                                                                    <span className={`text-[10px] uppercase font-bold tracking-tight ${isSelected ? 'text-sky-100' : 'text-emerald-600'}`}>
-                                                                                        {capInfo.available}/{capInfo.totalCapacity} disponibles
-                                                                                    </span>
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className={`text-[10px] uppercase font-bold tracking-tight ${isSelected ? 'text-sky-100' : 'text-emerald-600'}`}>
+                                                                                            {capInfo.available}/{capInfo.totalCapacity} disponibles
+                                                                                        </span>
+                                                                                        {(capInfo as any).relevantMonth && (capInfo as any).relevantMonth > new Date().toISOString().substring(0, 7) && (
+                                                                                            <span className={`text-[9px] font-bold ${isSelected ? 'text-sky-100/70' : 'text-sky-600/70'} italic`}>
+                                                                                                Cupo en {new Date((capInfo as any).relevantMonth + '-02').toLocaleDateString('es-PE', { month: 'long' })}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
                                                                                 )}
                                                                             </div>
 
